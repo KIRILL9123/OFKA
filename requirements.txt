@@ -1,0 +1,5 @@
+requests>=2.28.1
+beautifulsoup4>=4.11.1
+fake-useragent>=0.1.11
+PyQt6>=6.4.0
+pyqtdarktheme>=2.1.0
