@@ -4,21 +4,26 @@ import json
 from datetime import datetime
 import time
 import qdarktheme
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                            QHBoxLayout, QPushButton, QComboBox, QLabel, 
-                            QLineEdit, QSpinBox, QTabWidget, QTextEdit, 
-                            QTableWidget, QTableWidgetItem, QHeaderView, 
+
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                            QHBoxLayout, QPushButton, QComboBox, QLabel,
+                            QLineEdit, QSpinBox, QTabWidget, QTextEdit,
+                            QTableWidget, QTableWidgetItem, QHeaderView,
                             QCheckBox, QFileDialog, QMessageBox, QProgressBar,
                             QMenu, QMenuBar, QStatusBar, QToolBar, QSplitter)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 from PyQt6.QtGui import QAction, QIcon, QPixmap, QFont, QColor
 
-# Импортируем наш скрапер
-from ebay_kleinanzeige_scraper import EbayKleinanzeigeScraper
+from scraper.ebay_kleinanzeige_scraper import EbayKleinanzeigeScraper
+
+ 
 
 class ScraperApp(QMainWindow):
-    def __init__(self):
+    def __init__(self, scraper_class=None):
         super().__init__()
+        
+        # Скрапер
+        self.scraper_class = scraper_class or EbayKleinanzeigeScraper
         
         # Настройки приложения
         self.settings = QSettings("EbayKleinanzeigeScraperApp", "Settings")
@@ -199,10 +204,9 @@ class ScraperApp(QMainWindow):
         category_layout = QHBoxLayout()
         category_label = QLabel("Категория:")
         category_label.setStyleSheet("font-size: 16px; font-weight: bold;")
-        
         self.category_combo = QComboBox()
         self.category_combo.addItems([
-            "elektronik", "computer", "handy", "auto", 
+            "elektronik", "computer", "handy", "auto",
             "fahrrad", "immobilien", "wohnung", "haus",
             "mode", "kleidung", "möbel", "garten"
         ])
@@ -217,7 +221,6 @@ class ScraperApp(QMainWindow):
                 width: 20px;
             }
         """)
-        
         category_layout.addWidget(category_label)
         category_layout.addWidget(self.category_combo)
         form_layout.addLayout(category_layout)
@@ -226,7 +229,6 @@ class ScraperApp(QMainWindow):
         location_layout = QHBoxLayout()
         location_label = QLabel("Местоположение:")
         location_label.setStyleSheet("font-size: 16px; font-weight: bold;")
-        
         self.location_input = QLineEdit()
         self.location_input.setPlaceholderText("Например: Berlin")
         self.location_input.setStyleSheet("""
@@ -235,7 +237,6 @@ class ScraperApp(QMainWindow):
             padding: 8px;
             font-size: 14px;
         """)
-        
         location_layout.addWidget(location_label)
         location_layout.addWidget(self.location_input)
         form_layout.addLayout(location_layout)
@@ -244,7 +245,6 @@ class ScraperApp(QMainWindow):
         pages_layout = QHBoxLayout()
         pages_label = QLabel("Максимум страниц:")
         pages_label.setStyleSheet("font-size: 16px; font-weight: bold;")
-        
         self.pages_spin = QSpinBox()
         self.pages_spin.setMinimum(1)
         self.pages_spin.setMaximum(20)
@@ -255,7 +255,6 @@ class ScraperApp(QMainWindow):
             padding: 8px;
             font-size: 14px;
         """)
-        
         pages_layout.addWidget(pages_label)
         pages_layout.addWidget(self.pages_spin)
         form_layout.addLayout(pages_layout)
@@ -264,7 +263,6 @@ class ScraperApp(QMainWindow):
         delay_layout = QHBoxLayout()
         delay_label = QLabel("Задержка (секунды):")
         delay_label.setStyleSheet("font-size: 16px; font-weight: bold;")
-        
         delay_layout.addWidget(delay_label)
         
         self.delay_min_spin = QSpinBox()
@@ -277,7 +275,6 @@ class ScraperApp(QMainWindow):
             padding: 8px;
             font-size: 14px;
         """)
-        
         delay_layout.addWidget(QLabel("от"))
         delay_layout.addWidget(self.delay_min_spin)
         
@@ -291,12 +288,10 @@ class ScraperApp(QMainWindow):
             padding: 8px;
             font-size: 14px;
         """)
-        
         delay_layout.addWidget(QLabel("до"))
         delay_layout.addWidget(self.delay_max_spin)
         
         form_layout.addLayout(delay_layout)
-        
         layout.addLayout(form_layout)
         
         # Кнопка запуска скрапинга в стиле Airbnb
@@ -311,8 +306,8 @@ class ScraperApp(QMainWindow):
             font-weight: bold;
         """)
         self.start_button.clicked.connect(self.start_scraping)
-        
         layout.addWidget(self.start_button)
+        
         layout.addStretch()
         
         self.tabs.addTab(search_tab, "Поиск")
@@ -335,7 +330,7 @@ class ScraperApp(QMainWindow):
         # Таблица результатов
         self.results_table = QTableWidget(0, 6)
         self.results_table.setHorizontalHeaderLabels([
-            "Название", "Цена", "Описание", "Местоположение", 
+            "Название", "Цена", "Описание", "Местоположение",
             "Дата публикации", "URL"
         ])
         self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -353,7 +348,6 @@ class ScraperApp(QMainWindow):
                 font-weight: bold;
             }
         """)
-        
         layout.addWidget(self.results_table)
         
         # Кнопки действий
@@ -419,11 +413,9 @@ class ScraperApp(QMainWindow):
         theme_layout = QHBoxLayout()
         theme_label = QLabel("Тема оформления:")
         theme_label.setStyleSheet("font-size: 16px; font-weight: bold;")
-        
         self.theme_checkbox = QCheckBox("Темная тема")
         self.theme_checkbox.setChecked(self.dark_mode)
         self.theme_checkbox.stateChanged.connect(self.on_theme_changed)
-        
         theme_layout.addWidget(theme_label)
         theme_layout.addWidget(self.theme_checkbox)
         layout.addLayout(theme_layout)
@@ -432,7 +424,6 @@ class ScraperApp(QMainWindow):
         save_path_layout = QHBoxLayout()
         save_path_label = QLabel("Путь сохранения:")
         save_path_label.setStyleSheet("font-size: 16px; font-weight: bold;")
-        
         self.save_path_input = QLineEdit()
         self.save_path_input.setPlaceholderText("Путь для сохранения результатов")
         self.save_path_input.setStyleSheet("""
@@ -441,7 +432,6 @@ class ScraperApp(QMainWindow):
             padding: 8px;
             font-size: 14px;
         """)
-        
         browse_button = QPushButton("Обзор...")
         browse_button.setStyleSheet("""
             background-color: #ccc;
@@ -452,7 +442,6 @@ class ScraperApp(QMainWindow):
             font-size: 14px;
         """)
         browse_button.clicked.connect(self.browse_save_path)
-        
         save_path_layout.addWidget(save_path_label)
         save_path_layout.addWidget(self.save_path_input)
         save_path_layout.addWidget(browse_button)
@@ -462,7 +451,6 @@ class ScraperApp(QMainWindow):
         proxy_layout = QHBoxLayout()
         proxy_label = QLabel("Прокси (опционально):")
         proxy_label.setStyleSheet("font-size: 16px; font-weight: bold;")
-        
         self.proxy_input = QLineEdit()
         self.proxy_input.setPlaceholderText("http://user:pass@host:port")
         self.proxy_input.setStyleSheet("""
@@ -471,7 +459,6 @@ class ScraperApp(QMainWindow):
             padding: 8px;
             font-size: 14px;
         """)
-        
         proxy_layout.addWidget(proxy_label)
         proxy_layout.addWidget(self.proxy_input)
         layout.addLayout(proxy_layout)
@@ -488,8 +475,8 @@ class ScraperApp(QMainWindow):
             font-weight: bold;
         """)
         self.save_settings_button.clicked.connect(self.save_settings)
-        
         layout.addWidget(self.save_settings_button)
+        
         layout.addStretch()
         
         self.tabs.addTab(settings_tab, "Настройки")
@@ -504,18 +491,16 @@ class ScraperApp(QMainWindow):
         self.settings.setValue("dark_mode", self.dark_mode)
         self.settings.setValue("save_path", self.save_path_input.text())
         self.settings.setValue("proxy", self.proxy_input.text())
-        
         QMessageBox.information(self, "Настройки", "Настройки успешно сохранены")
     
     def on_theme_changed(self, state):
         """Обработчик изменения темы"""
         self.dark_mode = state == Qt.CheckState.Checked
         self.settings.setValue("dark_mode", self.dark_mode)
-        
         # Показываем уведомление о перезапуске
         QMessageBox.information(
-            self, 
-            "Смена темы", 
+            self,
+            "Смена темы",
             "Тема будет применена при следующем запуске приложения"
         )
     
@@ -524,10 +509,8 @@ class ScraperApp(QMainWindow):
         self.dark_mode = not self.dark_mode
         self.theme_checkbox.setChecked(self.dark_mode)
         self.settings.setValue("dark_mode", self.dark_mode)
-        
         # Применяем тему
         self.apply_theme()
-        
         # Обновляем UI
         self.init_ui()
     
@@ -585,7 +568,6 @@ class ScraperApp(QMainWindow):
         # Заполняем таблицу данными
         for row, item in enumerate(results):
             self.results_table.insertRow(row)
-            
             self.results_table.setItem(row, 0, QTableWidgetItem(item.get("title", "")))
             self.results_table.setItem(row, 1, QTableWidgetItem(item.get("price", "")))
             
@@ -620,7 +602,12 @@ class ScraperApp(QMainWindow):
     def stop_scraping(self):
         """Остановка процесса скрапинга"""
         if hasattr(self, 'scraping_thread') and self.scraping_thread.isRunning():
-            self.scraping_thread.terminate()
+            # Безопасная остановка потока
+            self.scraping_thread.stop_requested = True
+            # Ждем завершения потока
+            self.scraping_thread.wait(2000)  # Ждем до 2 секунд
+            if self.scraping_thread.isRunning():
+                self.scraping_thread.terminate()
             self.progress_bar.setVisible(False)
             self.start_button.setEnabled(True)
             self.statusBar.showMessage("Сбор данных остановлен")
@@ -637,7 +624,7 @@ class ScraperApp(QMainWindow):
             save_path = "ebay_kleinanzeige_data"
         
         # Создаем скрапер только для сохранения
-        scraper = EbayKleinanzeigeScraper()
+        scraper = self.scraper_class()
         
         # Генерируем имя файла
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -667,8 +654,8 @@ class ScraperApp(QMainWindow):
             return
         
         options = QMessageBox.question(
-            self, 
-            "Экспорт данных", 
+            self,
+            "Экспорт данных",
             "Выберите формат экспорта",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes
@@ -684,12 +671,14 @@ class ScraperApp(QMainWindow):
         QMessageBox.about(
             self,
             "О программе",
-            """<b>eBay Kleinanzeige Scraper</b>
-            <p>Версия 1.0</p>
-            <p>Приложение для сбора данных с eBay Kleinanzeige с элегантным интерфейсом в стиле Airbnb.</p>
+            """
+            **eBay Kleinanzeige Scraper**
+            
+            Версия 1.0
+            
+            Приложение для сбора данных с eBay Kleinanzeige с элегантным интерфейсом в стиле Airbnb.
             """
         )
-
 
 class ScrapingThread(QThread):
     """Поток для выполнения скрапинга в фоновом режиме"""
@@ -705,6 +694,7 @@ class ScrapingThread(QThread):
         self.delay_min = delay_min
         self.delay_max = delay_max
         self.proxy = proxy
+        self.stop_requested = False
     
     def run(self):
         """Основной метод потока"""
@@ -730,9 +720,10 @@ class ScrapingThread(QThread):
                 max_pages=self.max_pages
             )
             
-            # Отправляем результаты
-            self.result_signal.emit(results)
-            
+            # Проверяем, не был ли запрошен останов
+            if not self.stop_requested:
+                # Отправляем результаты
+                self.result_signal.emit(results)
         except Exception as e:
             # Отправляем сигнал об ошибке
             self.error_signal.emit(f"Ошибка при скрапинге: {str(e)}")
@@ -740,7 +731,6 @@ class ScrapingThread(QThread):
     def update_progress(self, value):
         """Обновление значения прогресса"""
         self.progress_signal.emit(value)
-
 
 if __name__ == "__main__":
     # Включаем поддержку HiDPI

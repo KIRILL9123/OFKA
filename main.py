@@ -1,9 +1,10 @@
 import sys
 import qdarktheme
 from PySide6.QtWidgets import QApplication
-
-from scraper.ebay_kleinanzeige_scraper import EbayKleinanzeigeScraper
 from gui.main_window import ScraperApp
+from scraper.ebay_kleinanzeige_scraper import EbayKleinanzeigeScraper
+
+
 
 if __name__ == "__main__":
     # Включаем поддержку HiDPI

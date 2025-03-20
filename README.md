@@ -1,6 +1,6 @@
 # eBay Kleinanzeige Scraper
 
-Элегантное приложение для сбора данных с eBay Kleinanzeige с интерфейсом в стиле Airbnb.
+Приложение для сбора данных с eBay Kleinanzeige с интерфейсом.
 
 ## Возможности
 
