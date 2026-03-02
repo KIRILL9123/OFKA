@@ -89,15 +89,46 @@ async def on_startup(bot: Bot) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # Migrate: add 'language' column if missing (for DBs created before v2)
+    # Migrations: add missing users columns for old DBs
     async with engine.begin() as conn:
         columns = await conn.execute(text("PRAGMA table_info(users)"))
         col_names = {row[1] for row in columns}
+
         if "language" not in col_names:
             await conn.execute(
                 text("ALTER TABLE users ADD COLUMN language VARCHAR(5)")
             )
             logger.info("Migrated: added 'language' column to users table")
+
+        if "pref_steam" not in col_names:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN pref_steam BOOLEAN NOT NULL DEFAULT 1")
+            )
+            logger.info("Migrated: added 'pref_steam' column to users table")
+
+        if "pref_epic" not in col_names:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN pref_epic BOOLEAN NOT NULL DEFAULT 1")
+            )
+            logger.info("Migrated: added 'pref_epic' column to users table")
+
+        if "pref_gog" not in col_names:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN pref_gog BOOLEAN NOT NULL DEFAULT 0")
+            )
+            logger.info("Migrated: added 'pref_gog' column to users table")
+
+        if "pref_other" not in col_names:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN pref_other BOOLEAN NOT NULL DEFAULT 0")
+            )
+            logger.info("Migrated: added 'pref_other' column to users table")
+
+        # Safety for old DB values that may contain NULLs
+        await conn.execute(text("UPDATE users SET pref_steam = 1 WHERE pref_steam IS NULL"))
+        await conn.execute(text("UPDATE users SET pref_epic = 1 WHERE pref_epic IS NULL"))
+        await conn.execute(text("UPDATE users SET pref_gog = 0 WHERE pref_gog IS NULL"))
+        await conn.execute(text("UPDATE users SET pref_other = 0 WHERE pref_other IS NULL"))
 
     logger.info("Database tables ready")
 

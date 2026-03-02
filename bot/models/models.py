@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, func, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -19,6 +19,30 @@ class User(Base):
     tg_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     language: Mapped[str | None] = mapped_column(String(5), nullable=True, default=None)
+    pref_steam: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default=text("1"),
+        nullable=False,
+    )
+    pref_epic: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default=text("1"),
+        nullable=False,
+    )
+    pref_gog: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=text("0"),
+        nullable=False,
+    )
+    pref_other: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=text("0"),
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )

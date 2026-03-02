@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     CHECK_INTERVAL_MINUTES: int = 15
     GAMERPOWER_API_URL: str = (
         "https://www.gamerpower.com/api/filter"
-        "?platform=pc.steam.epic-games-store.gog&type=game&sort-by=date"
+        "?platform=pc&type=game&sort-by=date"
     )
 
 

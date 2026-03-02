@@ -38,7 +38,7 @@ _TEXTS: dict[str, dict[str, str]] = {
             "<b>100% бесплатная игра</b> (навсегда) в <b>Steam</b>, "
             "<b>Epic Games Store</b> или <b>GOG</b>.\n\n"
             "Ничего делать не нужно — просто жди сообщений.\n\n"
-            "Команды: /help"
+            "Команды: /help, /settings"
         ),
         "uk": (
             "👋 <b>Ласкаво просимо!</b>\n\n"
@@ -46,7 +46,7 @@ _TEXTS: dict[str, dict[str, str]] = {
             "<b>100% безкоштовна гра</b> (назавжди) у <b>Steam</b>, "
             "<b>Epic Games Store</b> або <b>GOG</b>.\n\n"
             "Нічого робити не потрібно — просто чекай повідомлень.\n\n"
-            "Команди: /help"
+            "Команди: /help, /settings"
         ),
         "en": (
             "👋 <b>Welcome!</b>\n\n"
@@ -55,7 +55,7 @@ _TEXTS: dict[str, dict[str, str]] = {
             "<b>Epic Games Store</b>, or <b>GOG</b>.\n\n"
             "You don't need to do anything — just keep this chat "
             "and I'll message you when a new giveaway drops.\n\n"
-            "Commands: /help"
+            "Commands: /help, /settings"
         ),
         "de": (
             "👋 <b>Willkommen!</b>\n\n"
@@ -63,7 +63,7 @@ _TEXTS: dict[str, dict[str, str]] = {
             "<b>100% kostenloses Spiel</b> (dauerhaft) auf <b>Steam</b>, "
             "<b>Epic Games Store</b> oder <b>GOG</b> verfügbar ist.\n\n"
             "Du musst nichts tun — warte einfach auf Nachrichten.\n\n"
-            "Befehle: /help"
+            "Befehle: /help, /settings"
         ),
     },
     "help": {
@@ -74,7 +74,8 @@ _TEXTS: dict[str, dict[str, str]] = {
             "Когда появляется новая <b>бесплатная навсегда</b> игра — "
             "ты получишь уведомление со ссылкой.\n\n"
             "<b>Команды:</b>\n"
-            "/start — Подписаться / сменить язык\n"
+            "/start — Подписаться\n"
+            "/settings — Язык и платформы\n"
             "/help — Это сообщение"
         ),
         "uk": (
@@ -84,7 +85,8 @@ _TEXTS: dict[str, dict[str, str]] = {
             "Коли з'являється нова <b>безкоштовна назавжди</b> гра — "
             "ти отримаєш повідомлення з посиланням.\n\n"
             "<b>Команди:</b>\n"
-            "/start — Підписатися / змінити мову\n"
+            "/start — Підписатися\n"
+            "/settings — Мова та платформи\n"
             "/help — Це повідомлення"
         ),
         "en": (
@@ -94,7 +96,8 @@ _TEXTS: dict[str, dict[str, str]] = {
             "When a new <b>free-to-keep</b> game appears, I send you "
             "a notification with a direct link to claim it.\n\n"
             "<b>Commands:</b>\n"
-            "/start — Subscribe / change language\n"
+            "/start — Subscribe\n"
+            "/settings — Language and platforms\n"
             "/help — This message"
         ),
         "de": (
@@ -104,9 +107,64 @@ _TEXTS: dict[str, dict[str, str]] = {
             "Wenn ein neues <b>dauerhaft kostenloses</b> Spiel erscheint, "
             "sende ich dir eine Benachrichtigung mit Link.\n\n"
             "<b>Befehle:</b>\n"
-            "/start — Abonnieren / Sprache ändern\n"
+            "/start — Abonnieren\n"
+            "/settings — Sprache und Plattformen\n"
             "/help — Diese Nachricht"
         ),
+    },
+    "settings_hint": {
+        "ru": "⚙️ Открой /settings, чтобы выбрать язык и платформы уведомлений.",
+        "uk": "⚙️ Відкрий /settings, щоб обрати мову та платформи сповіщень.",
+        "en": "⚙️ Open /settings to choose language and notification platforms.",
+        "de": "⚙️ Öffne /settings, um Sprache und Benachrichtigungs-Plattformen zu wählen.",
+    },
+    "settings_title": {
+        "ru": "⚙️ <b>Настройки</b>\nВыбери, о каких платформах присылать уведомления:",
+        "uk": "⚙️ <b>Налаштування</b>\nОбери, про які платформи надсилати сповіщення:",
+        "en": "⚙️ <b>Settings</b>\nChoose which platforms to notify you about:",
+        "de": "⚙️ <b>Einstellungen</b>\nWähle, über welche Plattformen du Benachrichtigungen erhalten willst:",
+    },
+    "settings_language_title": {
+        "ru": "🌍 <b>Выбор языка</b>",
+        "uk": "🌍 <b>Вибір мови</b>",
+        "en": "🌍 <b>Choose language</b>",
+        "de": "🌍 <b>Sprache wählen</b>",
+    },
+    "settings_btn_steam": {
+        "ru": "Steam",
+        "uk": "Steam",
+        "en": "Steam",
+        "de": "Steam",
+    },
+    "settings_btn_epic": {
+        "ru": "Epic",
+        "uk": "Epic",
+        "en": "Epic",
+        "de": "Epic",
+    },
+    "settings_btn_gog": {
+        "ru": "GOG",
+        "uk": "GOG",
+        "en": "GOG",
+        "de": "GOG",
+    },
+    "settings_btn_other": {
+        "ru": "Другие",
+        "uk": "Інші",
+        "en": "Other",
+        "de": "Andere",
+    },
+    "settings_btn_language": {
+        "ru": "Язык",
+        "uk": "Мова",
+        "en": "Language",
+        "de": "Sprache",
+    },
+    "settings_saved": {
+        "ru": "Сохранено",
+        "uk": "Збережено",
+        "en": "Saved",
+        "de": "Gespeichert",
     },
     "game_caption": {
         "ru": (

@@ -20,6 +20,35 @@ from bot.models.models import User
 SEND_DELAY = 0.05
 
 
+def _game_matches_preferences(
+    game: dict[str, Any],
+    pref_steam: bool,
+    pref_epic: bool,
+    pref_gog: bool,
+    pref_other: bool,
+) -> bool:
+    """Return True if giveaway platforms match at least one enabled preference."""
+    platforms_raw = str(game.get("platforms", "")).strip().lower()
+    if not platforms_raw:
+        return pref_other
+
+    has_steam = "steam" in platforms_raw
+    has_epic = "epic" in platforms_raw
+    has_gog = "gog" in platforms_raw
+
+    known_hit = (
+        (pref_steam and has_steam)
+        or (pref_epic and has_epic)
+        or (pref_gog and has_gog)
+    )
+    if known_hit:
+        return True
+
+    # "Other" means any platform that is not Steam/Epic/GOG.
+    has_other = platforms_raw and not (has_steam or has_epic or has_gog)
+    return pref_other and has_other
+
+
 def build_game_caption(game: dict[str, Any], lang: str | None) -> str:
     """Format an HTML caption for a game giveaway notification."""
     return t(
@@ -104,15 +133,33 @@ async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
     """
     async with async_session() as session:
         result = await session.execute(
-            select(User.tg_id, User.language).where(User.is_active.is_(True))
+            select(
+                User.tg_id,
+                User.language,
+                User.pref_steam,
+                User.pref_epic,
+                User.pref_gog,
+                User.pref_other,
+            ).where(User.is_active.is_(True))
         )
-        users: list[tuple[int, str | None]] = list(result.tuples().all())
+        users: list[tuple[int, str | None, bool, bool, bool, bool]] = list(
+            result.tuples().all()
+        )
 
     success = 0
     failed = 0
     deactivated_ids: list[int] = []
 
-    for tg_id, lang in users:
+    for tg_id, lang, pref_steam, pref_epic, pref_gog, pref_other in users:
+        if not _game_matches_preferences(
+            game,
+            pref_steam,
+            pref_epic,
+            pref_gog,
+            pref_other,
+        ):
+            continue
+
         delivered = await send_game_to_user(bot, tg_id, game, lang)
         if delivered:
             success += 1

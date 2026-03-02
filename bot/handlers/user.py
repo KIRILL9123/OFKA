@@ -1,10 +1,17 @@
-"""Handlers for regular user commands: /start, /help, and language selection."""
+"""Handlers for user commands: /start, /help, /settings, preferences."""
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 
 from bot.core.database import async_session
@@ -13,11 +20,36 @@ from bot.models.models import User
 
 router = Router(name="user")
 
-LANG_CALLBACK_PREFIX = "set_lang:"
+SETTINGS_PREFIX = "settings:"
+LANG_CALLBACK_PREFIX = f"{SETTINGS_PREFIX}set_lang:"
+TOGGLE_CALLBACK_PREFIX = f"{SETTINGS_PREFIX}toggle:"
+OPEN_LANG_PICKER_CB = f"{SETTINGS_PREFIX}open_lang"
+BACK_TO_SETTINGS_CB = f"{SETTINGS_PREFIX}back"
+
+PLATFORM_FIELDS: dict[str, str] = {
+    "steam": "pref_steam",
+    "epic": "pref_epic",
+    "gog": "pref_gog",
+    "other": "pref_other",
+}
+
+
+def _on_off(value: bool) -> str:
+    return "✅" if value else "❌"
+
+
+def _main_menu_keyboard() -> ReplyKeyboardMarkup:
+    """Build persistent reply keyboard with quick actions."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="⚙️ Settings"), KeyboardButton(text="ℹ️ Help")],
+        ],
+        resize_keyboard=True,
+    )
 
 
 def _language_keyboard() -> InlineKeyboardMarkup:
-    """Build an inline keyboard with language buttons (2 per row)."""
+    """Build language selection keyboard (2 buttons per row)."""
     buttons = [
         InlineKeyboardButton(
             text=label,
@@ -25,24 +57,55 @@ def _language_keyboard() -> InlineKeyboardMarkup:
         )
         for code, label in LANG_LABELS.items()
     ]
-    # 2 buttons per row
     rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(text="⬅️", callback_data=BACK_TO_SETTINGS_CB)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _get_user_lang(tg_id: int) -> str | None:
-    """Fetch the user's language from DB (None if not set)."""
-    async with async_session() as session:
-        return await session.scalar(
-            select(User.language).where(User.tg_id == tg_id)
-        )
+def _settings_keyboard(
+    lang: str | None,
+    pref_steam: bool,
+    pref_epic: bool,
+    pref_gog: bool,
+    pref_other: bool,
+) -> InlineKeyboardMarkup:
+    """Build user settings keyboard with platform toggles and language button."""
+    current_lang = lang if lang in LANG_LABELS else "en"
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"{_on_off(pref_steam)} {t('settings_btn_steam', lang)}",
+                    callback_data=f"{TOGGLE_CALLBACK_PREFIX}steam",
+                ),
+                InlineKeyboardButton(
+                    text=f"{_on_off(pref_epic)} {t('settings_btn_epic', lang)}",
+                    callback_data=f"{TOGGLE_CALLBACK_PREFIX}epic",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"{_on_off(pref_gog)} {t('settings_btn_gog', lang)}",
+                    callback_data=f"{TOGGLE_CALLBACK_PREFIX}gog",
+                ),
+                InlineKeyboardButton(
+                    text=f"{_on_off(pref_other)} {t('settings_btn_other', lang)}",
+                    callback_data=f"{TOGGLE_CALLBACK_PREFIX}other",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"🌍 {t('settings_btn_language', lang)}: {LANG_LABELS[current_lang]}",
+                    callback_data=OPEN_LANG_PICKER_CB,
+                )
+            ],
+        ]
+    )
 
 
-@router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
-    """Register / reactivate the user. Show language picker on first visit."""
-    tg_id = message.from_user.id
-
+async def _ensure_user_exists(tg_id: int) -> None:
+    """Create or reactivate user row, preserving existing preferences."""
     async with async_session() as session:
         stmt = (
             sqlite_upsert(User)
@@ -55,50 +118,181 @@ async def cmd_start(message: Message) -> None:
         await session.execute(stmt)
         await session.commit()
 
-    lang = await _get_user_lang(tg_id)
 
-    if lang is None:
-        # First time — ask to pick a language
-        await message.answer(
-            "🌍 Choose your language / Выберите язык / Оберіть мову / Wähle deine Sprache:",
-            reply_markup=_language_keyboard(),
+async def _get_user_settings(
+    tg_id: int,
+) -> tuple[str | None, bool, bool, bool, bool]:
+    """Fetch language and platform preferences for a user."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(
+                User.language,
+                User.pref_steam,
+                User.pref_epic,
+                User.pref_gog,
+                User.pref_other,
+            ).where(User.tg_id == tg_id)
         )
-    else:
-        # Returning user — greet in their language
-        await message.answer(t("start", lang), parse_mode="HTML")
+        row = result.first()
+
+    if row is None:
+        return None, True, True, False, False
+    return row
+
+
+@router.message(CommandStart())
+async def cmd_start(message: Message) -> None:
+    """Register/reactivate user and show welcome message."""
+    tg_id = message.from_user.id
+    await _ensure_user_exists(tg_id)
+    lang, _, _, _, _ = await _get_user_settings(tg_id)
+
+    await message.answer(
+        t("start", lang),
+        parse_mode="HTML",
+        reply_markup=_main_menu_keyboard(),
+    )
+    await message.answer(
+        t("settings_hint", lang),
+        parse_mode="HTML",
+        reply_markup=_main_menu_keyboard(),
+    )
 
     logger.info("User {tg_id} started the bot", tg_id=tg_id)
-
-
-@router.callback_query(F.data.startswith(LANG_CALLBACK_PREFIX))
-async def cb_set_language(callback: CallbackQuery) -> None:
-    """Handle language selection callback."""
-    lang = callback.data.removeprefix(LANG_CALLBACK_PREFIX)
-    tg_id = callback.from_user.id
-
-    async with async_session() as session:
-        stmt = (
-            sqlite_upsert(User)
-            .values(tg_id=tg_id, is_active=True, language=lang)
-            .on_conflict_do_update(
-                index_elements=[User.tg_id],
-                set_={"is_active": True, "language": lang},
-            )
-        )
-        await session.execute(stmt)
-        await session.commit()
-
-    logger.info("User {tg_id} set language to {lang}", tg_id=tg_id, lang=lang)
-
-    # Remove the keyboard and confirm
-    await callback.message.edit_text(t("language_set", lang), parse_mode="HTML")
-    # Send welcome right after
-    await callback.message.answer(t("start", lang), parse_mode="HTML")
-    await callback.answer()
 
 
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
     """Show help information in the user's language."""
-    lang = await _get_user_lang(message.from_user.id)
-    await message.answer(t("help", lang), parse_mode="HTML")
+    await _ensure_user_exists(message.from_user.id)
+    lang, _, _, _, _ = await _get_user_settings(message.from_user.id)
+    await message.answer(
+        t("help", lang),
+        parse_mode="HTML",
+        reply_markup=_main_menu_keyboard(),
+    )
+
+
+@router.message(Command("settings"))
+async def cmd_settings(message: Message) -> None:
+    """Open settings panel with language and platform preferences."""
+    tg_id = message.from_user.id
+    await _ensure_user_exists(tg_id)
+    lang, pref_steam, pref_epic, pref_gog, pref_other = await _get_user_settings(tg_id)
+
+    await message.answer(
+        t("settings_hint", lang),
+        parse_mode="HTML",
+        reply_markup=_main_menu_keyboard(),
+    )
+    await message.answer(
+        t("settings_title", lang),
+        parse_mode="HTML",
+        reply_markup=_settings_keyboard(lang, pref_steam, pref_epic, pref_gog, pref_other),
+    )
+
+
+@router.message(F.text == "⚙️ Settings")
+async def open_settings_button(message: Message) -> None:
+    """Open settings when user taps reply keyboard button."""
+    await cmd_settings(message)
+
+
+@router.message(F.text == "ℹ️ Help")
+async def open_help_button(message: Message) -> None:
+    """Open help when user taps reply keyboard button."""
+    await cmd_help(message)
+
+
+@router.callback_query(F.data == OPEN_LANG_PICKER_CB)
+async def cb_open_language_picker(callback: CallbackQuery) -> None:
+    """Open language picker from settings."""
+    await _ensure_user_exists(callback.from_user.id)
+    lang, _, _, _, _ = await _get_user_settings(callback.from_user.id)
+    await callback.message.edit_text(
+        t("settings_language_title", lang),
+        parse_mode="HTML",
+        reply_markup=_language_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == BACK_TO_SETTINGS_CB)
+async def cb_back_to_settings(callback: CallbackQuery) -> None:
+    """Return from language picker to settings menu."""
+    await _ensure_user_exists(callback.from_user.id)
+    lang, pref_steam, pref_epic, pref_gog, pref_other = await _get_user_settings(
+        callback.from_user.id
+    )
+    await callback.message.edit_text(
+        t("settings_title", lang),
+        parse_mode="HTML",
+        reply_markup=_settings_keyboard(lang, pref_steam, pref_epic, pref_gog, pref_other),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith(TOGGLE_CALLBACK_PREFIX))
+async def cb_toggle_platform(callback: CallbackQuery) -> None:
+    """Toggle per-user platform preference in settings menu."""
+    platform = callback.data.removeprefix(TOGGLE_CALLBACK_PREFIX)
+    field = PLATFORM_FIELDS.get(platform)
+    if field is None:
+        await callback.answer()
+        return
+
+    tg_id = callback.from_user.id
+    await _ensure_user_exists(tg_id)
+    lang, pref_steam, pref_epic, pref_gog, pref_other = await _get_user_settings(tg_id)
+    current = {
+        "pref_steam": pref_steam,
+        "pref_epic": pref_epic,
+        "pref_gog": pref_gog,
+        "pref_other": pref_other,
+    }[field]
+
+    async with async_session() as session:
+        await session.execute(
+            update(User)
+            .where(User.tg_id == tg_id)
+            .values(**{field: (not current)})
+        )
+        await session.commit()
+
+    lang, pref_steam, pref_epic, pref_gog, pref_other = await _get_user_settings(tg_id)
+    await callback.message.edit_text(
+        t("settings_title", lang),
+        parse_mode="HTML",
+        reply_markup=_settings_keyboard(lang, pref_steam, pref_epic, pref_gog, pref_other),
+    )
+    await callback.answer(t("settings_saved", lang))
+
+
+@router.callback_query(F.data.startswith(LANG_CALLBACK_PREFIX))
+async def cb_set_language(callback: CallbackQuery) -> None:
+    """Handle language selection callback from settings menu."""
+    lang = callback.data.removeprefix(LANG_CALLBACK_PREFIX)
+    tg_id = callback.from_user.id
+    await _ensure_user_exists(tg_id)
+
+    if lang not in LANG_LABELS:
+        await callback.answer()
+        return
+
+    async with async_session() as session:
+        await session.execute(
+            update(User)
+            .where(User.tg_id == tg_id)
+            .values(language=lang, is_active=True)
+        )
+        await session.commit()
+
+    logger.info("User {tg_id} set language to {lang}", tg_id=tg_id, lang=lang)
+
+    _, pref_steam, pref_epic, pref_gog, pref_other = await _get_user_settings(tg_id)
+    await callback.message.edit_text(
+        f"{t('language_set', lang)}\n\n{t('settings_title', lang)}",
+        parse_mode="HTML",
+        reply_markup=_settings_keyboard(lang, pref_steam, pref_epic, pref_gog, pref_other),
+    )
+    await callback.answer()
