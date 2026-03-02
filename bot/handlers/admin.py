@@ -17,7 +17,15 @@ router = Router(name="admin")
 
 
 def _is_admin(message: Message) -> bool:
-    return message.from_user.id == settings.ADMIN_ID
+    """Verify admin access and log unauthorized attempts."""
+    is_authorized = message.from_user.id == settings.ADMIN_ID
+    if not is_authorized:
+        logger.warning(
+            "Unauthorized admin command attempt from user {tg_id}: {cmd}",
+            tg_id=message.from_user.id,
+            cmd=message.text[:50] if message.text else "unknown",
+        )
+    return is_authorized
 
 
 @router.message(Command("stats"))
@@ -40,7 +48,7 @@ async def cmd_stats(message: Message) -> None:
         f"🎮 Games sent: <b>{total_games}</b>"
     )
     await message.answer(text, parse_mode="HTML")
-    logger.info("Admin requested stats")
+    logger.info("Admin {tg_id} requested stats", tg_id=message.from_user.id)
 
 
 @router.message(Command("force_check"))
@@ -54,7 +62,7 @@ async def cmd_force_check(message: Message, bot: Bot) -> None:
         return
 
     await message.answer("🔄 Running giveaway check…")
-    logger.info("Admin triggered force_check")
+    logger.info("Admin {tg_id} triggered force_check", tg_id=message.from_user.id)
 
     # Late import to avoid circular dependency
     from bot.main import check_new_games
@@ -83,6 +91,13 @@ async def cmd_broadcast(message: Message, bot: Bot) -> None:
         await message.answer("❌ Usage: /broadcast &lt;text&gt;")
         return
 
+    # Validate broadcast message length
+    if len(payload) > settings.MAX_MESSAGE_LENGTH:
+        await message.answer(
+            f"❌ Message too long ({len(payload)} chars, max {settings.MAX_MESSAGE_LENGTH})."
+        )
+        return
+
     await message.answer("📤 Broadcasting…")
     success, failed = await broadcast_text(bot, payload)
     await message.answer(
@@ -91,7 +106,8 @@ async def cmd_broadcast(message: Message, bot: Bot) -> None:
         parse_mode="HTML",
     )
     logger.info(
-        "Admin broadcast: {ok} delivered, {fail} failed",
+        "Admin {tg_id} broadcast: {ok} delivered, {fail} failed",
+        tg_id=message.from_user.id,
         ok=success,
         fail=failed,
     )

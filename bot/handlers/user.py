@@ -1,5 +1,6 @@
 """Handlers for user commands: /start, /help, /settings, preferences."""
 
+import asyncio
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
@@ -14,6 +15,7 @@ from loguru import logger
 from sqlalchemy import select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 
+from bot.core.config import settings
 from bot.core.database import async_session
 from bot.core.translations import LANG_LABELS, t
 from bot.models.models import User
@@ -32,6 +34,47 @@ PLATFORM_FIELDS: dict[str, str] = {
     "gog": "pref_gog",
     "other": "pref_other",
 }
+
+# Rate-limiting: track user action timestamps
+_user_rate_limit: dict[int, list[float]] = {}
+
+
+def _is_rate_limited(tg_id: int) -> bool:
+    """Check if user has exceeded rate limit (prevent spam/DoS)."""
+    import time
+
+    now = time.time()
+    cutoff = now - 60  # Last minute
+
+    if tg_id not in _user_rate_limit:
+        _user_rate_limit[tg_id] = [now]
+        return False
+
+    # Remove old timestamps
+    _user_rate_limit[tg_id] = [ts for ts in _user_rate_limit[tg_id] if ts > cutoff]
+
+    if len(_user_rate_limit[tg_id]) >= settings.USER_RATE_LIMIT_PER_MINUTE:
+        return True
+
+    _user_rate_limit[tg_id].append(now)
+    return False
+
+
+def _validate_callback_data(data: str, max_length: int | None = None) -> bool:
+    """Validate callback_query data to prevent injection/DoS attacks."""
+    if max_length is None:
+        max_length = settings.MAX_CALLBACK_LENGTH
+
+    # Check length
+    if len(data) > max_length:
+        return False
+
+    # Check for valid characters (alphanumeric, underscore, colon, hyphen)
+    valid_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_:-")
+    if not all(c in valid_chars for c in data):
+        return False
+
+    return True
 
 
 def _on_off(value: bool) -> str:
@@ -144,6 +187,12 @@ async def _get_user_settings(
 async def cmd_start(message: Message) -> None:
     """Register/reactivate user and show welcome message."""
     tg_id = message.from_user.id
+
+    # Rate-limit check
+    if _is_rate_limited(tg_id):
+        await message.answer("⏳ Please wait a moment before the next action.")
+        return
+
     await _ensure_user_exists(tg_id)
     lang, _, _, _, _ = await _get_user_settings(tg_id)
 
@@ -177,6 +226,12 @@ async def cmd_help(message: Message) -> None:
 async def cmd_settings(message: Message) -> None:
     """Open settings panel with language and platform preferences."""
     tg_id = message.from_user.id
+
+    # Rate-limit check
+    if _is_rate_limited(tg_id):
+        await message.answer("⏳ Please wait a moment before the next action.")
+        return
+
     await _ensure_user_exists(tg_id)
     lang, pref_steam, pref_epic, pref_gog, pref_other = await _get_user_settings(tg_id)
 
@@ -235,13 +290,34 @@ async def cb_back_to_settings(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith(TOGGLE_CALLBACK_PREFIX))
 async def cb_toggle_platform(callback: CallbackQuery) -> None:
     """Toggle per-user platform preference in settings menu."""
+    # Validate callback data
+    if not _validate_callback_data(callback.data):
+        logger.warning(
+            "Invalid callback data from user {tg_id}: {data}",
+            tg_id=callback.from_user.id,
+            data=callback.data[:50],
+        )
+        await callback.answer("⚠️ Invalid request. Please try again.", show_alert=False)
+        return
+
     platform = callback.data.removeprefix(TOGGLE_CALLBACK_PREFIX)
     field = PLATFORM_FIELDS.get(platform)
-    if field is None:
+    if field is None or platform not in PLATFORM_FIELDS:
+        logger.warning(
+            "Invalid platform from user {tg_id}: {platform}",
+            tg_id=callback.from_user.id,
+            platform=platform,
+        )
         await callback.answer()
         return
 
     tg_id = callback.from_user.id
+
+    # Rate-limit check
+    if _is_rate_limited(tg_id):
+        await callback.answer("⏳ Too many requests. Please wait.", show_alert=False)
+        return
+
     await _ensure_user_exists(tg_id)
     lang, pref_steam, pref_epic, pref_gog, pref_other = await _get_user_settings(tg_id)
     current = {
@@ -271,13 +347,34 @@ async def cb_toggle_platform(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith(LANG_CALLBACK_PREFIX))
 async def cb_set_language(callback: CallbackQuery) -> None:
     """Handle language selection callback from settings menu."""
+    # Validate callback data
+    if not _validate_callback_data(callback.data):
+        logger.warning(
+            "Invalid language callback from user {tg_id}",
+            tg_id=callback.from_user.id,
+        )
+        await callback.answer("⚠️ Invalid request.", show_alert=False)
+        return
+
     lang = callback.data.removeprefix(LANG_CALLBACK_PREFIX)
     tg_id = callback.from_user.id
-    await _ensure_user_exists(tg_id)
 
+    # Validate language code
     if lang not in LANG_LABELS:
+        logger.warning(
+            "Invalid language code from user {tg_id}: {lang}",
+            tg_id=tg_id,
+            lang=lang,
+        )
         await callback.answer()
         return
+
+    # Rate-limit check
+    if _is_rate_limited(tg_id):
+        await callback.answer("⏳ Too many requests. Please wait.", show_alert=False)
+        return
+
+    await _ensure_user_exists(tg_id)
 
     async with async_session() as session:
         await session.execute(
