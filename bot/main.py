@@ -6,15 +6,17 @@ import asyncio
 import sys
 from pathlib import Path
 
+from alembic import command
+from alembic.config import Config
 from aiogram import Bot, Dispatcher
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from bot.core.config import settings
-from bot.core.database import async_session, engine
+from bot.core.database import async_session, engine, get_effective_database_url
 from bot.handlers import admin, user
-from bot.models.models import Base, Game
+from bot.models.models import Game
 from bot.services.api_client import fetch_free_games
 from bot.services.broadcaster import broadcast_game
 
@@ -49,32 +51,62 @@ async def check_new_games(bot: Bot) -> None:
         logger.info("No active giveaways found")
         return
 
-    new_count = 0
+    games_by_external_id: dict[int, dict] = {}
     for game in games:
         external_id = game.get("id")
-        if external_id is None:
-            continue
+        if isinstance(external_id, int):
+            games_by_external_id[external_id] = game
 
-        async with async_session() as session:
-            exists = await session.scalar(
-                select(Game.id).where(Game.external_id == external_id)
-            )
-            if exists:
-                continue
+    if not games_by_external_id:
+        logger.info("No valid giveaways with external_id found")
+        return
 
-            # Save new game to DB
-            db_game = Game(
-                external_id=external_id,
-                title=game.get("title", "Unknown"),
+    external_ids = list(games_by_external_id.keys())
+    async with async_session() as session:
+        existing_result = await session.execute(
+            select(Game.external_id).where(Game.external_id.in_(external_ids))
+        )
+        existing_ids = set(existing_result.scalars().all())
+
+        new_ids = [external_id for external_id in external_ids if external_id not in existing_ids]
+        new_games = [games_by_external_id[external_id] for external_id in new_ids]
+
+        if new_games:
+            session.add_all(
+                [
+                    Game(
+                        external_id=external_id,
+                        title=games_by_external_id[external_id].get("title", "Unknown"),
+                    )
+                    for external_id in new_ids
+                ]
             )
-            session.add(db_game)
             await session.commit()
 
+    new_count = 0
+    for game in new_games:
         logger.info("New giveaway detected: {title}", title=game.get("title"))
         new_count += 1
         await broadcast_game(bot, game)
 
     logger.info("Check complete — {n} new game(s) broadcasted", n=new_count)
+
+
+def _to_sync_db_url(database_url: str) -> str:
+    """Convert async SQLAlchemy URL to sync URL for Alembic."""
+    return database_url.replace("+aiosqlite", "")
+
+
+def run_alembic_migrations() -> None:
+    """Run Alembic migrations up to head."""
+    root_dir = Path(__file__).resolve().parents[1]
+    alembic_cfg = Config(str(root_dir / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(root_dir / "migrations"))
+    alembic_cfg.set_main_option(
+        "sqlalchemy.url",
+        _to_sync_db_url(get_effective_database_url()),
+    )
+    command.upgrade(alembic_cfg, "head")
 
 
 # ---------------------------------------------------------------------------
@@ -83,54 +115,11 @@ async def check_new_games(bot: Bot) -> None:
 
 
 async def on_startup(bot: Bot) -> None:
-    """Create DB tables, apply migrations, and ensure data directories exist."""
+    """Run DB migrations and ensure data directories exist."""
     Path("data/logs").mkdir(parents=True, exist_ok=True)
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    # Migrations: add missing users columns for old DBs
-    async with engine.begin() as conn:
-        columns = await conn.execute(text("PRAGMA table_info(users)"))
-        col_names = {row[1] for row in columns}
-
-        if "language" not in col_names:
-            await conn.execute(
-                text("ALTER TABLE users ADD COLUMN language VARCHAR(5)")
-            )
-            logger.info("Migrated: added 'language' column to users table")
-
-        if "pref_steam" not in col_names:
-            await conn.execute(
-                text("ALTER TABLE users ADD COLUMN pref_steam BOOLEAN NOT NULL DEFAULT 1")
-            )
-            logger.info("Migrated: added 'pref_steam' column to users table")
-
-        if "pref_epic" not in col_names:
-            await conn.execute(
-                text("ALTER TABLE users ADD COLUMN pref_epic BOOLEAN NOT NULL DEFAULT 1")
-            )
-            logger.info("Migrated: added 'pref_epic' column to users table")
-
-        if "pref_gog" not in col_names:
-            await conn.execute(
-                text("ALTER TABLE users ADD COLUMN pref_gog BOOLEAN NOT NULL DEFAULT 0")
-            )
-            logger.info("Migrated: added 'pref_gog' column to users table")
-
-        if "pref_other" not in col_names:
-            await conn.execute(
-                text("ALTER TABLE users ADD COLUMN pref_other BOOLEAN NOT NULL DEFAULT 0")
-            )
-            logger.info("Migrated: added 'pref_other' column to users table")
-
-        # Safety for old DB values that may contain NULLs
-        await conn.execute(text("UPDATE users SET pref_steam = 1 WHERE pref_steam IS NULL"))
-        await conn.execute(text("UPDATE users SET pref_epic = 1 WHERE pref_epic IS NULL"))
-        await conn.execute(text("UPDATE users SET pref_gog = 0 WHERE pref_gog IS NULL"))
-        await conn.execute(text("UPDATE users SET pref_other = 0 WHERE pref_other IS NULL"))
-
-    logger.info("Database tables ready")
+    await asyncio.to_thread(run_alembic_migrations)
+    logger.info("Database migrations applied")
 
     me = await bot.me()
     logger.info("Bot started as @{username}", username=me.username)
