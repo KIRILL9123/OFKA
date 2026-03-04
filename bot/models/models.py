@@ -21,25 +21,21 @@ class User(Base):
     language: Mapped[str | None] = mapped_column(String(5), nullable=True, default=None)
     pref_steam: Mapped[bool] = mapped_column(
         Boolean,
-        default=True,
         server_default=text("1"),
         nullable=False,
     )
     pref_epic: Mapped[bool] = mapped_column(
         Boolean,
-        default=True,
         server_default=text("1"),
         nullable=False,
     )
     pref_gog: Mapped[bool] = mapped_column(
         Boolean,
-        default=False,
         server_default=text("0"),
         nullable=False,
     )
     pref_other: Mapped[bool] = mapped_column(
         Boolean,
-        default=False,
         server_default=text("0"),
         nullable=False,
     )

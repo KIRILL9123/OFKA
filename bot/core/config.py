@@ -1,5 +1,6 @@
 """Application configuration loaded from environment variables."""
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +13,14 @@ class Settings(BaseSettings):
     )
 
     BOT_TOKEN: str
+
+    @field_validator("BOT_TOKEN")
+    @classmethod
+    def validate_bot_token(cls, v: str) -> str:
+        import re
+        if not re.match(r"^\d+:[A-Za-z0-9_-]+$", v):
+            raise ValueError("Invalid bot token format")
+        return v
     ADMIN_ID: int
     DATABASE_URL: str = "sqlite+aiosqlite:///data/bot.db"
     CHECK_INTERVAL_MINUTES: int = 15

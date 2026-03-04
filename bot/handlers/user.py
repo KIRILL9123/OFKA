@@ -39,27 +39,29 @@ PLATFORM_FIELDS: dict[str, str] = {
 
 # Rate-limiting: track user action timestamps
 _user_rate_limit: dict[int, list[float]] = {}
+_user_rate_limit_lock = asyncio.Lock()
 
 
-def _is_rate_limited(tg_id: int) -> bool:
+async def _is_rate_limited(tg_id: int) -> bool:
     """Check if user has exceeded rate limit (prevent spam/DoS)."""
     import time
 
     now = time.time()
     cutoff = now - 60  # Last minute
 
-    if tg_id not in _user_rate_limit:
-        _user_rate_limit[tg_id] = [now]
+    async with _user_rate_limit_lock:
+        if tg_id not in _user_rate_limit:
+            _user_rate_limit[tg_id] = [now]
+            return False
+
+        # Remove old timestamps
+        _user_rate_limit[tg_id] = [ts for ts in _user_rate_limit[tg_id] if ts > cutoff]
+
+        if len(_user_rate_limit[tg_id]) >= settings.USER_RATE_LIMIT_PER_MINUTE:
+            return True
+
+        _user_rate_limit[tg_id].append(now)
         return False
-
-    # Remove old timestamps
-    _user_rate_limit[tg_id] = [ts for ts in _user_rate_limit[tg_id] if ts > cutoff]
-
-    if len(_user_rate_limit[tg_id]) >= settings.USER_RATE_LIMIT_PER_MINUTE:
-        return True
-
-    _user_rate_limit[tg_id].append(now)
-    return False
 
 
 def _validate_callback_data(data: str, max_length: int | None = None) -> bool:
@@ -159,19 +161,25 @@ def _settings_keyboard(
     )
 
 
-async def _ensure_user_exists(tg_id: int) -> None:
-    """Create or reactivate user row, preserving existing preferences."""
+async def _ensure_user_exists(tg_id: int) -> tuple[bool, bool]:
+    """Create or reactivate user row, preserving existing preferences.
+    Returns (created, reactivated).
+    """
     async with async_session() as session:
-        stmt = (
-            sqlite_upsert(User)
-            .values(tg_id=tg_id, is_active=True)
-            .on_conflict_do_update(
-                index_elements=[User.tg_id],
-                set_={"is_active": True},
-            )
-        )
-        await session.execute(stmt)
+        result = await session.execute(select(User).where(User.tg_id == tg_id))
+        user = result.scalars().first()
+        created = False
+        reactivated = False
+        if not user:
+            created = True
+            user = User(tg_id=tg_id, is_active=True)
+            session.add(user)
+        else:
+            if not user.is_active:
+                reactivated = True
+                user.is_active = True
         await session.commit()
+        return created, reactivated
 
 
 async def _get_user_settings(
@@ -201,7 +209,7 @@ async def cmd_start(message: Message) -> None:
     tg_id = message.from_user.id
 
     # Rate-limit check
-    if _is_rate_limited(tg_id):
+    if await _is_rate_limited(tg_id):
         lang, _, _, _, _ = await _get_user_settings(tg_id)
         await message.answer(
             t("rate_limit_message", lang),
@@ -209,20 +217,28 @@ async def cmd_start(message: Message) -> None:
         )
         return
 
-    await _ensure_user_exists(tg_id)
+    created, reactivated = await _ensure_user_exists(tg_id)
     lang, _, _, _, _ = await _get_user_settings(tg_id)
 
-    await message.answer(
-        t("start", lang),
-        parse_mode="HTML",
-        reply_markup=_main_menu_keyboard(),
-    )
-    await message.answer(
-        t("subscription_confirmed", lang),
-        parse_mode="HTML",
-    )
+    if reactivated:
+        await message.answer(
+            t("resubscribed", lang),
+            parse_mode="HTML",
+            reply_markup=_main_menu_keyboard(),
+        )
+    else:
+        await message.answer(
+            t("start", lang),
+            parse_mode="HTML",
+            reply_markup=_main_menu_keyboard(),
+        )
+        if created:
+            await message.answer(
+                t("subscription_confirmed", lang),
+                parse_mode="HTML",
+            )
 
-    logger.info("User {tg_id} started the bot", tg_id=tg_id)
+    logger.info("User {tg_id} started the bot (created={created}, reactivated={reactivated})", tg_id=tg_id, created=created, reactivated=reactivated)
 
 
 @router.message(Command("help"))
@@ -242,8 +258,7 @@ async def cmd_settings(message: Message) -> None:
     tg_id = message.from_user.id
 
     # Rate-limit check
-    if _is_rate_limited(tg_id):
-        await _ensure_user_exists(tg_id)
+    if await _is_rate_limited(tg_id):
         lang, _, _, _, _ = await _get_user_settings(tg_id)
         await message.answer(
             t("rate_limit_message", lang),
@@ -328,8 +343,7 @@ async def cb_toggle_platform(callback: CallbackQuery) -> None:
     tg_id = callback.from_user.id
 
     # Rate-limit check
-    if _is_rate_limited(tg_id):
-        await _ensure_user_exists(tg_id)
+    if await _is_rate_limited(tg_id):
         lang, _, _, _, _ = await _get_user_settings(tg_id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
@@ -412,7 +426,7 @@ async def cb_set_language(callback: CallbackQuery) -> None:
         return
 
     # Rate-limit check
-    if _is_rate_limited(tg_id):
+    if await _is_rate_limited(tg_id):
         await callback.answer("⏳ Too many requests. Please wait.", show_alert=False)
         return
 
@@ -450,13 +464,15 @@ async def cb_done_settings(callback: CallbackQuery) -> None:
 async def cb_unsubscribe(callback: CallbackQuery) -> None:
     """Disable notifications for the user."""
     tg_id = callback.from_user.id
-    await _ensure_user_exists(tg_id)
-    lang, _, _, _, _ = await _get_user_settings(tg_id)
 
     # Rate-limit check
-    if _is_rate_limited(tg_id):
+    if await _is_rate_limited(tg_id):
+        lang, _, _, _, _ = await _get_user_settings(tg_id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
+
+    await _ensure_user_exists(tg_id)
+    lang, _, _, _, _ = await _get_user_settings(tg_id)
 
     async with async_session() as session:
         await session.execute(

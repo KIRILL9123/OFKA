@@ -31,6 +31,12 @@ _TEXTS: dict[str, dict[str, str]] = {
         "en": "✅ Language set: <b>English</b>",
         "de": "✅ Sprache eingestellt: <b>Deutsch</b>",
     },
+    "resubscribed": {
+        "ru": "👋 Рады видеть вас снова!\n\n🔔 <i>Уведомления о раздачах успешно возобновлены.</i>",
+        "uk": "👋 Раді бачити вас знову!\n\n🔔 <i>Сповіщення про роздачі успішно відновлено.</i>",
+        "en": "👋 Glad to see you again!\n\n🔔 <i>Giveaway notifications have been successfully resumed.</i>",
+        "de": "👋 Schön, dich wiederzusehen!\n\n🔔 <i>Die Giveaway-Benachrichtigungen wurden erfolgreich fortgesetzt.</i>",
+    },
     "start": {
         "ru": (
             "👋 <b>Добро пожаловать!</b>\n\n"
