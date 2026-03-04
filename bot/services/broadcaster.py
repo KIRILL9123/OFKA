@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from datetime import datetime
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
@@ -20,6 +21,75 @@ from bot.models.models import User
 SEND_DELAY = 0.05
 
 
+def _format_platform_names(platforms_raw: str | None) -> str:
+    """Format platform names with emojis and clean text."""
+    if not platforms_raw or not platforms_raw.strip():
+        return "🎮 Unknown"
+    
+    platform_emoji_map = {
+        "steam": "🎮 Steam",
+        "epic": "🎮 Epic Games",
+        "gog": "🎮 GOG",
+        "amazon": "📦 Amazon",
+        "itch.io": "🕹️ Itch.io",
+        "ubisoft": "🎮 Ubisoft",
+        "origin": "🎮 Origin",
+    }
+    
+    platforms = [p.strip().lower() for p in platforms_raw.split(",")]
+    platforms = list(dict.fromkeys(platforms))  # Remove duplicates
+    
+    formatted = []
+    for platform in platforms:
+        # Try exact match first
+        if platform in platform_emoji_map:
+            formatted.append(platform_emoji_map[platform])
+        else:
+            # Try partial match
+            matched = False
+            for key, emoji_text in platform_emoji_map.items():
+                if key in platform:
+                    formatted.append(emoji_text)
+                    matched = True
+                    break
+            if not matched:
+                # Fallback: capitalize and add generic emoji
+                formatted.append(f"🎮 {platform.title()}")
+    
+    return ", ".join(formatted)
+
+
+def _format_end_date(end_date_raw: str | None) -> str:
+    """Parse end_date and return human-readable format with days remaining."""
+    if not end_date_raw or end_date_raw == "N/A":
+        return "Unknown"
+    
+    try:
+        # Try to parse common date formats
+        # Format: "2026-03-15" or "March 15, 2026"
+        for fmt in ["%Y-%m-%d", "%B %d, %Y", "%d.%m.%Y", "%d/%m/%Y"]:
+            try:
+                end = datetime.strptime(end_date_raw.strip(), fmt)
+                now = datetime.now()
+                delta = (end - now).days
+                
+                if delta < 0:
+                    return f"Expired"
+                elif delta == 0:
+                    return f"Today"
+                elif delta == 1:
+                    return f"Tomorrow"
+                else:
+                    return f"{end_date_raw} ({delta} days left)"
+            except ValueError:
+                continue
+    except Exception:
+        pass
+    
+    # Fallback to raw value
+    return end_date_raw
+
+
 def _game_matches_preferences(
     game: dict[str, Any],
     pref_steam: bool,
@@ -27,14 +97,24 @@ def _game_matches_preferences(
     pref_gog: bool,
     pref_other: bool,
 ) -> bool:
-    """Return True if giveaway platforms match at least one enabled preference."""
+    """Return True if giveaway platforms match at least one enabled preference.
+    
+    Handles empty/null platforms gracefully and normalizes duplicates.
+    """
     platforms_raw = str(game.get("platforms", "")).strip().lower()
+    
+    # If platforms string is empty, treat as "Other"
     if not platforms_raw:
         return pref_other
 
-    has_steam = "steam" in platforms_raw
-    has_epic = "epic" in platforms_raw
-    has_gog = "gog" in platforms_raw
+    # Normalize: split, strip, deduplicate, rejoin
+    platform_list = [p.strip() for p in platforms_raw.split(",")]
+    platform_list = list(dict.fromkeys(platform_list))  # Remove duplicates while preserving order
+    platforms_normalized = ", ".join(platform_list)
+
+    has_steam = any("steam" in p for p in platform_list)
+    has_epic = any("epic" in p for p in platform_list)
+    has_gog = any("gog" in p for p in platform_list)
 
     known_hit = (
         (pref_steam and has_steam)
@@ -45,20 +125,45 @@ def _game_matches_preferences(
         return True
 
     # "Other" means any platform that is not Steam/Epic/GOG.
-    has_other = platforms_raw and not (has_steam or has_epic or has_gog)
+    has_other = platforms_normalized and not (has_steam or has_epic or has_gog)
     return pref_other and has_other
 
 
 def build_game_caption(game: dict[str, Any], lang: str | None) -> str:
-    """Format an HTML caption for a game giveaway notification."""
+    """Format an HTML caption for a game giveaway notification.
+    
+    Handles N/A values gracefully, truncates long descriptions, formats dates and platforms.
+    """
+    unknown = t("unknown_value", lang)
+    MAX_DESCRIPTION_LENGTH = 800
+    
+    title = game.get("title", unknown)
+    worth = game.get("worth", "N/A")
+    if worth == "N/A":
+        worth = unknown
+    
+    # Format platforms with emojis
+    platforms_raw = game.get("platforms", "")
+    platforms = _format_platform_names(platforms_raw) if platforms_raw else unknown
+    
+    # Format end date with days remaining
+    end_date_raw = game.get("end_date", "")
+    end_date = _format_end_date(end_date_raw) if end_date_raw else unknown
+    
+    # Build description section: truncate if too long
+    description = (game.get("description") or "").strip()
+    if len(description) > MAX_DESCRIPTION_LENGTH:
+        description = description[:MAX_DESCRIPTION_LENGTH].rstrip() + "..."
+    description_section = f"\n\n<i>{description}</i>" if description else ""
+    
     return t(
         "game_caption",
         lang,
-        title=game.get("title", "Unknown"),
-        worth=game.get("worth", "N/A"),
-        platforms=game.get("platforms", "N/A"),
-        end_date=game.get("end_date", "N/A"),
-        description=game.get("description", ""),
+        title=title,
+        worth=worth,
+        platforms=platforms,
+        end_date=end_date,
+        description_section=description_section,
     )
 
 
@@ -81,6 +186,7 @@ async def send_game_to_user(
     """Send a single game notification to one user.
 
     Returns True if message was delivered, False if user should be deactivated.
+    Falls back to text message if image fails to load.
     """
     caption = build_game_caption(game, lang)
     keyboard = build_game_keyboard(game, lang)
@@ -88,14 +194,28 @@ async def send_game_to_user(
 
     try:
         if thumbnail:
-            photo = URLInputFile(thumbnail)
-            await bot.send_photo(
-                chat_id=tg_id,
-                photo=photo,
-                caption=caption,
-                parse_mode=ParseMode.HTML,
-                reply_markup=keyboard,
-            )
+            try:
+                photo = URLInputFile(thumbnail)
+                await bot.send_photo(
+                    chat_id=tg_id,
+                    photo=photo,
+                    caption=caption,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=keyboard,
+                )
+            except Exception as img_exc:
+                # Fallback to text message if image fails
+                logger.warning(
+                    "Failed to load image for user {tg_id}, sending text instead: {exc}",
+                    tg_id=tg_id,
+                    exc=img_exc,
+                )
+                await bot.send_message(
+                    chat_id=tg_id,
+                    text=caption,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=keyboard,
+                )
         else:
             await bot.send_message(
                 chat_id=tg_id,

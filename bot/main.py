@@ -9,6 +9,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommand, BotCommandScope
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 from sqlalchemy import select
@@ -115,7 +116,7 @@ def run_alembic_migrations() -> None:
 
 
 async def on_startup(bot: Bot) -> None:
-    """Run DB migrations and ensure data directories exist."""
+    """Run DB migrations, ensure data directories exist, and set up bot commands."""
     Path("data/logs").mkdir(parents=True, exist_ok=True)
 
     await asyncio.to_thread(run_alembic_migrations)
@@ -123,6 +124,15 @@ async def on_startup(bot: Bot) -> None:
 
     me = await bot.me()
     logger.info("Bot started as @{username}", username=me.username)
+
+    # Set up bot commands for all languages (for command auto-completion)
+    commands = [
+        BotCommand(command="start", description="Subscribe to free games notifications"),
+        BotCommand(command="settings", description="Change language and platforms"),
+        BotCommand(command="help", description="How the bot works"),
+    ]
+    await bot.set_my_commands(commands, scope=BotCommandScope.default())
+    logger.info("Bot commands registered")
 
     # Run initial check after DB is fully ready
     asyncio.create_task(check_new_games(bot))

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 from sqlalchemy import func, select
 
@@ -14,6 +14,9 @@ from bot.models.models import Game, User
 from bot.services.broadcaster import broadcast_text
 
 router = Router(name="admin")
+
+# For storing pending broadcast message
+_pending_broadcast: dict[int, str] = {}
 
 
 def _is_admin(message: Message) -> bool:
@@ -72,8 +75,8 @@ async def cmd_force_check(message: Message, bot: Bot) -> None:
 
 
 @router.message(Command("broadcast"))
-async def cmd_broadcast(message: Message, bot: Bot) -> None:
-    """Broadcast a custom HTML message to all active users (admin only).
+async def cmd_broadcast(message: Message) -> None:
+    """Request broadcast message from admin (admin only).
 
     Usage: /broadcast <text>
     """
@@ -88,7 +91,7 @@ async def cmd_broadcast(message: Message, bot: Bot) -> None:
     # Strip the /broadcast command prefix
     payload = text.removeprefix("/broadcast").strip()
     if not payload:
-        await message.answer("❌ Usage: /broadcast &lt;text&gt;")
+        await message.answer("❌ Usage: /broadcast <text>")
         return
 
     # Validate broadcast message length
@@ -98,16 +101,62 @@ async def cmd_broadcast(message: Message, bot: Bot) -> None:
         )
         return
 
-    await message.answer("📤 Broadcasting…")
-    success, failed = await broadcast_text(bot, payload)
+    # Store pending broadcast and ask for confirmation
+    tg_id = message.from_user.id
+    _pending_broadcast[tg_id] = payload
+    
+    confirm_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Send", callback_data="broadcast:confirm"),
+                InlineKeyboardButton(text="❌ Cancel", callback_data="broadcast:cancel"),
+            ]
+        ]
+    )
+    
     await message.answer(
-        f"✅ Broadcast done.\n"
-        f"Delivered: <b>{success}</b> | Failed: <b>{failed}</b>",
+        f"📢 <b>Confirm broadcast to all active users:</b>\n\n{payload}",
+        parse_mode="HTML",
+        reply_markup=confirm_keyboard,
+    )
+
+
+@router.callback_query(F.data == "broadcast:confirm")
+async def cb_broadcast_confirm(callback: CallbackQuery, bot: Bot) -> None:
+    """Confirm and send the broadcast message."""
+    tg_id = callback.from_user.id
+    if tg_id != settings.ADMIN_ID:
+        await callback.answer("❌ Unauthorized", show_alert=True)
+        return
+    
+    payload = _pending_broadcast.pop(tg_id, None)
+    if not payload:
+        await callback.answer("❌ No pending broadcast", show_alert=True)
+        return
+    
+    await callback.message.edit_text("📤 Broadcasting…")
+    success, failed = await broadcast_text(bot, payload)
+    
+    await callback.message.edit_text(
+        f"✅ Broadcast done.\nDelivered: <b>{success}</b> | Failed: <b>{failed}</b>",
         parse_mode="HTML",
     )
     logger.info(
         "Admin {tg_id} broadcast: {ok} delivered, {fail} failed",
-        tg_id=message.from_user.id,
+        tg_id=tg_id,
         ok=success,
         fail=failed,
     )
+
+
+@router.callback_query(F.data == "broadcast:cancel")
+async def cb_broadcast_cancel(callback: CallbackQuery) -> None:
+    """Cancel pending broadcast."""
+    tg_id = callback.from_user.id
+    if tg_id != settings.ADMIN_ID:
+        await callback.answer("❌ Unauthorized", show_alert=True)
+        return
+    
+    _pending_broadcast.pop(tg_id, None)
+    await callback.message.delete()
+    await callback.answer("Broadcast cancelled.")

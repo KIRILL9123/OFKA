@@ -27,6 +27,8 @@ LANG_CALLBACK_PREFIX = f"{SETTINGS_PREFIX}set_lang:"
 TOGGLE_CALLBACK_PREFIX = f"{SETTINGS_PREFIX}toggle:"
 OPEN_LANG_PICKER_CB = f"{SETTINGS_PREFIX}open_lang"
 BACK_TO_SETTINGS_CB = f"{SETTINGS_PREFIX}back"
+UNSUBSCRIBE_CB = f"{SETTINGS_PREFIX}unsubscribe"
+DONE_CB = f"{SETTINGS_PREFIX}done"
 
 PLATFORM_FIELDS: dict[str, str] = {
     "steam": "pref_steam",
@@ -101,7 +103,7 @@ def _language_keyboard() -> InlineKeyboardMarkup:
         for code, label in LANG_LABELS.items()
     ]
     rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
-    rows.append([InlineKeyboardButton(text="⬅️", callback_data=BACK_TO_SETTINGS_CB)])
+    rows.append([InlineKeyboardButton(text=t("btn_back", "en"), callback_data=BACK_TO_SETTINGS_CB)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -112,7 +114,7 @@ def _settings_keyboard(
     pref_gog: bool,
     pref_other: bool,
 ) -> InlineKeyboardMarkup:
-    """Build user settings keyboard with platform toggles and language button."""
+    """Build user settings keyboard with platform toggles, language button, and unsubscribe."""
     current_lang = lang if lang in LANG_LABELS else "en"
 
     return InlineKeyboardMarkup(
@@ -142,6 +144,16 @@ def _settings_keyboard(
                     text=f"🌍 {t('settings_btn_language', lang)}: {LANG_LABELS[current_lang]}",
                     callback_data=OPEN_LANG_PICKER_CB,
                 )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("btn_unsubscribe", lang),
+                    callback_data=UNSUBSCRIBE_CB,
+                ),
+                InlineKeyboardButton(
+                    text=t("btn_done", lang),
+                    callback_data=DONE_CB,
+                ),
             ],
         ]
     )
@@ -185,12 +197,16 @@ async def _get_user_settings(
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
-    """Register/reactivate user and show welcome message."""
+    """Register/reactivate user and show welcome + subscription confirmation."""
     tg_id = message.from_user.id
 
     # Rate-limit check
     if _is_rate_limited(tg_id):
-        await message.answer("⏳ Please wait a moment before the next action.")
+        lang, _, _, _, _ = await _get_user_settings(tg_id)
+        await message.answer(
+            t("rate_limit_message", lang),
+            parse_mode="HTML",
+        )
         return
 
     await _ensure_user_exists(tg_id)
@@ -202,9 +218,8 @@ async def cmd_start(message: Message) -> None:
         reply_markup=_main_menu_keyboard(),
     )
     await message.answer(
-        t("settings_hint", lang),
+        t("subscription_confirmed", lang),
         parse_mode="HTML",
-        reply_markup=_main_menu_keyboard(),
     )
 
     logger.info("User {tg_id} started the bot", tg_id=tg_id)
@@ -218,7 +233,6 @@ async def cmd_help(message: Message) -> None:
     await message.answer(
         t("help", lang),
         parse_mode="HTML",
-        reply_markup=_main_menu_keyboard(),
     )
 
 
@@ -229,17 +243,17 @@ async def cmd_settings(message: Message) -> None:
 
     # Rate-limit check
     if _is_rate_limited(tg_id):
-        await message.answer("⏳ Please wait a moment before the next action.")
+        await _ensure_user_exists(tg_id)
+        lang, _, _, _, _ = await _get_user_settings(tg_id)
+        await message.answer(
+            t("rate_limit_message", lang),
+            parse_mode="HTML",
+        )
         return
 
     await _ensure_user_exists(tg_id)
     lang, pref_steam, pref_epic, pref_gog, pref_other = await _get_user_settings(tg_id)
 
-    await message.answer(
-        t("settings_hint", lang),
-        parse_mode="HTML",
-        reply_markup=_main_menu_keyboard(),
-    )
     await message.answer(
         t("settings_title", lang),
         parse_mode="HTML",
@@ -315,7 +329,9 @@ async def cb_toggle_platform(callback: CallbackQuery) -> None:
 
     # Rate-limit check
     if _is_rate_limited(tg_id):
-        await callback.answer("⏳ Too many requests. Please wait.", show_alert=False)
+        await _ensure_user_exists(tg_id)
+        lang, _, _, _, _ = await _get_user_settings(tg_id)
+        await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
 
     await _ensure_user_exists(tg_id)
@@ -327,6 +343,19 @@ async def cb_toggle_platform(callback: CallbackQuery) -> None:
         "pref_other": pref_other,
     }[field]
 
+    # Calculate new state after toggle
+    new_state = {
+        "pref_steam": pref_steam if field != "pref_steam" else not current,
+        "pref_epic": pref_epic if field != "pref_epic" else not current,
+        "pref_gog": pref_gog if field != "pref_gog" else not current,
+        "pref_other": pref_other if field != "pref_other" else not current,
+    }
+    
+    # Validate: at least one platform must be enabled
+    if not any(new_state.values()):
+        await callback.answer(t("platform_all_disabled", lang), show_alert=True)
+        return
+
     async with async_session() as session:
         await session.execute(
             update(User)
@@ -335,11 +364,24 @@ async def cb_toggle_platform(callback: CallbackQuery) -> None:
         )
         await session.commit()
 
-    lang, pref_steam, pref_epic, pref_gog, pref_other = await _get_user_settings(tg_id)
+    # Log platform toggle
+    logger.info(
+        "User {tg_id} toggled {platform} to {state}",
+        tg_id=tg_id,
+        platform=platform,
+        state=not current,
+    )
+
+    # Optimization: use calculated new_state instead of re-fetching from DB
+    new_pref_steam = new_state["pref_steam"]
+    new_pref_epic = new_state["pref_epic"]
+    new_pref_gog = new_state["pref_gog"]
+    new_pref_other = new_state["pref_other"]
+    
     await callback.message.edit_text(
         t("settings_title", lang),
         parse_mode="HTML",
-        reply_markup=_settings_keyboard(lang, pref_steam, pref_epic, pref_gog, pref_other),
+        reply_markup=_settings_keyboard(lang, new_pref_steam, new_pref_epic, new_pref_gog, new_pref_other),
     )
     await callback.answer(t("settings_saved", lang))
 
@@ -391,5 +433,44 @@ async def cb_set_language(callback: CallbackQuery) -> None:
         f"{t('language_set', lang)}\n\n{t('settings_title', lang)}",
         parse_mode="HTML",
         reply_markup=_settings_keyboard(lang, pref_steam, pref_epic, pref_gog, pref_other),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == DONE_CB)
+async def cb_done_settings(callback: CallbackQuery) -> None:
+    """Close settings panel and return to main menu."""
+    await _ensure_user_exists(callback.from_user.id)
+    lang, _, _, _, _ = await _get_user_settings(callback.from_user.id)
+    await callback.message.delete()
+    await callback.answer(t("settings_saved", lang))
+
+
+@router.callback_query(F.data == UNSUBSCRIBE_CB)
+async def cb_unsubscribe(callback: CallbackQuery) -> None:
+    """Disable notifications for the user."""
+    tg_id = callback.from_user.id
+    await _ensure_user_exists(tg_id)
+    lang, _, _, _, _ = await _get_user_settings(tg_id)
+
+    # Rate-limit check
+    if _is_rate_limited(tg_id):
+        await callback.answer(t("rate_limit_message", lang), show_alert=False)
+        return
+
+    async with async_session() as session:
+        await session.execute(
+            update(User)
+            .where(User.tg_id == tg_id)
+            .values(is_active=False)
+        )
+        await session.commit()
+
+    logger.info("User {tg_id} unsubscribed from notifications", tg_id=tg_id)
+    
+    await callback.message.delete()
+    await callback.message.answer(
+        t("unsubscribe_confirmed", lang),
+        parse_mode="HTML",
     )
     await callback.answer()

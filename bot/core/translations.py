@@ -112,6 +112,18 @@ _TEXTS: dict[str, dict[str, str]] = {
             "/help — Diese Nachricht"
         ),
     },
+    "subscription_confirmed": {
+        "ru": "✅ <b>Вы подписаны!</b>\n\nТеперь вы будете получать уведомления о новых бесплатных играх.",
+        "uk": "✅ <b>Ви підписані!</b>\n\nТепер ви будете отримувати сповіщення про нові безкоштовні ігри.",
+        "en": "✅ <b>You're subscribed!</b>\n\nYou will now receive notifications about new free games.",
+        "de": "✅ <b>Du bist abonniert!</b>\n\nDu erhältst jetzt Benachrichtigungen über neue kostenlose Spiele.",
+    },
+    "unsubscribe_confirmed": {
+        "ru": "👋 Уведомления отключены. Вы можете подписаться снова командой /start",
+        "uk": "👋 Сповіщення вимкнено. Ви можете підписатися знову командою /start",
+        "en": "👋 Notifications disabled. You can subscribe again with /start",
+        "de": "👋 Benachrichtigungen deaktiviert. Du kannst dich jederzeit mit /start erneut abonnieren.",
+    },
     "settings_hint": {
         "ru": "⚙️ Открой /settings, чтобы выбрать язык и платформы уведомлений.",
         "uk": "⚙️ Відкрий /settings, щоб обрати мову та платформи сповіщень.",
@@ -119,10 +131,10 @@ _TEXTS: dict[str, dict[str, str]] = {
         "de": "⚙️ Öffne /settings, um Sprache und Benachrichtigungs-Plattformen zu wählen.",
     },
     "settings_title": {
-        "ru": "⚙️ <b>Настройки</b>\nВыбери, о каких платформах присылать уведомления:",
-        "uk": "⚙️ <b>Налаштування</b>\nОбери, про які платформи надсилати сповіщення:",
-        "en": "⚙️ <b>Settings</b>\nChoose which platforms to notify you about:",
-        "de": "⚙️ <b>Einstellungen</b>\nWähle, über welche Plattformen du Benachrichtigungen erhalten willst:",
+        "ru": "⚙️ <b>Настройки</b>\nВыбери, о каких платформах присылать уведомления:\n\n💡 <i>«Другие» = Amazon, Itch.io, Ubisoft, Origin, GOG+ и прочее</i>",
+        "uk": "⚙️ <b>Налаштування</b>\nОбери, про які платформи надсилати сповіщення:\n\n💡 <i>«Інші» = Amazon, Itch.io, Ubisoft, Origin, GOG+ та інше</i>",
+        "en": "⚙️ <b>Settings</b>\nChoose which platforms to notify you about:\n\n💡 <i>«Other» = Amazon, Itch.io, Ubisoft, Origin, GOG+, and more</i>",
+        "de": "⚙️ <b>Einstellungen</b>\nWähle, über welche Plattformen du Benachrichtigungen erhalten willst:\n\n💡 <i>«Andere» = Amazon, Itch.io, Ubisoft, Origin, GOG+ und mehr</i>",
     },
     "settings_language_title": {
         "ru": "🌍 <b>Выбор языка</b>",
@@ -171,36 +183,68 @@ _TEXTS: dict[str, dict[str, str]] = {
             "🎮 <b>{title}</b>\n"
             "💰 Цена: <s>{worth}</s> → <b>БЕСПЛАТНО</b>\n"
             "🏪 Платформа: {platforms}\n"
-            "⏳ До: {end_date}\n\n"
-            "<i>{description}</i>"
+            "⏳ До: {end_date}{description_section}"
         ),
         "uk": (
             "🎮 <b>{title}</b>\n"
             "💰 Ціна: <s>{worth}</s> → <b>БЕЗКОШТОВНО</b>\n"
             "🏪 Платформа: {platforms}\n"
-            "⏳ До: {end_date}\n\n"
-            "<i>{description}</i>"
+            "⏳ До: {end_date}{description_section}"
         ),
         "en": (
             "🎮 <b>{title}</b>\n"
             "💰 Price: <s>{worth}</s> → <b>FREE</b>\n"
             "🏪 Platform: {platforms}\n"
-            "⏳ Ends: {end_date}\n\n"
-            "<i>{description}</i>"
+            "⏳ Ends: {end_date}{description_section}"
         ),
         "de": (
             "🎮 <b>{title}</b>\n"
             "💰 Preis: <s>{worth}</s> → <b>KOSTENLOS</b>\n"
             "🏪 Plattform: {platforms}\n"
-            "⏳ Bis: {end_date}\n\n"
-            "<i>{description}</i>"
+            "⏳ Bis: {end_date}{description_section}"
         ),
+    },
+    "rate_limit_message": {
+        "ru": "⏳ Подождите немного перед следующим действием.",
+        "uk": "⏳ Почекайте трохи перед наступною дією.",
+        "en": "⏳ Please wait a moment before the next action.",
+        "de": "⏳ Bitte warten Sie einen Moment vor der nächsten Aktion.",
+    },
+    "unknown_value": {
+        "ru": "Неизвестно",
+        "uk": "Невідомо",
+        "en": "Unknown",
+        "de": "Unbekannt",
     },
     "claim_button": {
         "ru": "🎁 Забрать игру",
         "uk": "🎁 Забрати гру",
         "en": "🎁 Claim Game",
         "de": "🎁 Spiel holen",
+    },
+    "btn_back": {
+        "ru": "⬅️ Назад",
+        "uk": "⬅️ Назад",
+        "en": "⬅️ Back",
+        "de": "⬅️ Zurück",
+    },
+    "btn_done": {
+        "ru": "✅ Готово",
+        "uk": "✅ Готово",
+        "en": "✅ Done",
+        "de": "✅ Fertig",
+    },
+    "btn_unsubscribe": {
+        "ru": "🔕 Отключить уведомления",
+        "uk": "🔕 Вимкнути сповіщення",
+        "en": "🔕 Disable notifications",
+        "de": "🔕 Benachrichtigungen deaktivieren",
+    },
+    "platform_all_disabled": {
+        "ru": "⚠️ Включите хотя бы одну платформу!",
+        "uk": "⚠️ Увімкніть принаймні одну платформу!",
+        "en": "⚠️ Enable at least one platform!",
+        "de": "⚠️ Aktivieren Sie mindestens eine Plattform!",
     },
 }
 
