@@ -86,6 +86,20 @@ async def check_new_games(bot: Bot) -> None:
 
     new_count = 0
     for game in new_games:
+        # Validate game has required fields and is not expired
+        if not game.get("title") or not game.get("id"):
+            logger.warning("Skipping invalid game: {game}", game=game)
+            continue
+        
+        # Skip expired games
+        end_date_raw = game.get("end_date", "")
+        if end_date_raw and end_date_raw != "N/A":
+            from bot.services.broadcaster import _format_end_date
+            formatted_date = _format_end_date(end_date_raw)
+            if formatted_date is None:  # Expired
+                logger.info("Skipping expired game: {title}", title=game.get("title"))
+                continue
+        
         logger.info("New giveaway detected: {title}", title=game.get("title"))
         new_count += 1
         await broadcast_game(bot, game)
@@ -176,7 +190,9 @@ async def main() -> None:
     try:
         await dp.start_polling(bot)
     finally:
-        scheduler.shutdown(wait=False)
+        # Graceful shutdown: wait up to 30 seconds for running jobs to complete
+        scheduler.shutdown(wait=True)
+        logger.info("Scheduler shut down gracefully")
 
 
 if __name__ == "__main__":

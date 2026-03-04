@@ -291,6 +291,12 @@ async def open_help_button(message: Message) -> None:
 @router.callback_query(F.data == OPEN_LANG_PICKER_CB)
 async def cb_open_language_picker(callback: CallbackQuery) -> None:
     """Open language picker from settings."""
+    # Rate-limit check
+    if await _is_rate_limited(callback.from_user.id):
+        lang, _, _, _, _ = await _get_user_settings(callback.from_user.id)
+        await callback.answer(t("rate_limit_message", lang), show_alert=False)
+        return
+    
     await _ensure_user_exists(callback.from_user.id)
     lang, _, _, _, _ = await _get_user_settings(callback.from_user.id)
     await callback.message.edit_text(
@@ -304,6 +310,12 @@ async def cb_open_language_picker(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == BACK_TO_SETTINGS_CB)
 async def cb_back_to_settings(callback: CallbackQuery) -> None:
     """Return from language picker to settings menu."""
+    # Rate-limit check
+    if await _is_rate_limited(callback.from_user.id):
+        lang, _, _, _, _ = await _get_user_settings(callback.from_user.id)
+        await callback.answer(t("rate_limit_message", lang), show_alert=False)
+        return
+    
     await _ensure_user_exists(callback.from_user.id)
     lang, pref_steam, pref_epic, pref_gog, pref_other = await _get_user_settings(
         callback.from_user.id
@@ -454,6 +466,21 @@ async def cb_set_language(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == DONE_CB)
 async def cb_done_settings(callback: CallbackQuery) -> None:
     """Close settings panel and return to main menu."""
+    # Validate callback data
+    if not _validate_callback_data(callback.data):
+        logger.warning(
+            "Invalid callback data in DONE_CB from user {tg_id}",
+            tg_id=callback.from_user.id,
+        )
+        await callback.answer("⚠️ Invalid request.", show_alert=False)
+        return
+    
+    # Rate-limit check
+    if await _is_rate_limited(callback.from_user.id):
+        lang, _, _, _, _ = await _get_user_settings(callback.from_user.id)
+        await callback.answer(t("rate_limit_message", lang), show_alert=False)
+        return
+    
     await _ensure_user_exists(callback.from_user.id)
     lang, _, _, _, _ = await _get_user_settings(callback.from_user.id)
     await callback.message.delete()

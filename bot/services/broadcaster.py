@@ -39,9 +39,14 @@ def _format_platform_names(platforms_raw: str | None) -> str:
         "origin": "🎮 Origin",
     }
     
-    # Split, lowercase, deduplicate
-    platforms = [p.strip().lower() for p in platforms_raw.split(",")]
-    platforms = list(dict.fromkeys(platforms))  # Remove duplicates
+    # Split, lowercase, deduplicate using set comprehension for better performance
+    seen = set()
+    platforms = []
+    for p in platforms_raw.split(","):
+        p_clean = p.strip().lower()
+        if p_clean and p_clean not in seen:
+            seen.add(p_clean)
+            platforms.append(p_clean)
     
     formatted = []
     for platform in platforms:
@@ -60,9 +65,10 @@ def _format_platform_names(platforms_raw: str | None) -> str:
     return ", ".join(formatted) if formatted else "🎮 Unknown"
 
 
-def _format_end_date(end_date_raw: str | None) -> str:
+def _format_end_date(end_date_raw: str | None) -> str | None:
     """Parse end_date and return human-readable format with days remaining.
     
+    Returns None for expired games (to signal filtering).
     Tries common date formats. Fails gracefully to raw value if parsing unsuccessful.
     """
     if not end_date_raw or end_date_raw == "N/A":
@@ -77,7 +83,7 @@ def _format_end_date(end_date_raw: str | None) -> str:
                 delta = (end - now).days
                 
                 if delta < 0:
-                    return "Expired"
+                    return None  # Signal to skip expired games
                 elif delta == 0:
                     return "Today"
                 elif delta == 1:
@@ -110,9 +116,14 @@ def _game_matches_preferences(
     if not platforms_raw:
         return pref_other
 
-    # Normalize: split, strip, deduplicate, rejoin
-    platform_list = [p.strip() for p in platforms_raw.split(",")]
-    platform_list = list(dict.fromkeys(platform_list))  # Remove duplicates while preserving order
+    # Normalize: split, strip, deduplicate using set for performance
+    seen_platforms = set()
+    platform_list = []
+    for p in platforms_raw.split(","):
+        p_clean = p.strip()
+        if p_clean and p_clean not in seen_platforms:
+            seen_platforms.add(p_clean)
+            platform_list.append(p_clean)
     platforms_normalized = ", ".join(platform_list)
 
     has_steam = any("steam" in p for p in platform_list)
@@ -143,7 +154,7 @@ def build_game_caption(game: dict[str, Any], lang: str | None) -> str:
     MAX_TITLE_LENGTH = 200
     
     # Truncate title to prevent caption from exceeding 1024 char limit
-    title = game.get("title", unknown)
+    title = game.get("title") or unknown  # Handle empty string
     if len(title) > MAX_TITLE_LENGTH:
         title = title[:MAX_TITLE_LENGTH].rstrip() + "…"
     
@@ -157,7 +168,7 @@ def build_game_caption(game: dict[str, Any], lang: str | None) -> str:
     
     # Format end date with days remaining
     end_date_raw = game.get("end_date", "")
-    end_date = _format_end_date(end_date_raw) if end_date_raw else unknown
+    end_date = _format_end_date(end_date_raw) if (end_date_raw and end_date_raw != "N/A") else unknown
     
     # Build description section: truncate if too long
     description = (game.get("description") or "").strip()
@@ -272,7 +283,7 @@ async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
             ).where(User.is_active.is_(True))
         )
         users: list[tuple[int, str | None, bool, bool, bool, bool]] = list(
-            result.tuples().all()
+            result.yield_per(500).tuples().all()  # Use yield_per for memory efficiency with large user bases
         )
 
     success = 0

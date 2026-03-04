@@ -252,6 +252,66 @@ _TEXTS: dict[str, dict[str, str]] = {
         "en": "⚠️ Enable at least one platform!",
         "de": "⚠️ Aktivieren Sie mindestens eine Plattform!",
     },
+    "admin_broadcast_empty": {
+        "ru": "❌ Текст сообщения не может быть пустым.",
+        "uk": "❌ Текст повідомлення не може бути порожнім.",
+        "en": "❌ Message text cannot be empty.",
+        "de": "❌ Nachrichtentext darf nicht leer sein.",
+    },
+    "admin_broadcast_usage": {
+        "ru": "❌ Использование: /broadcast <текст>",
+        "uk": "❌ Використання: /broadcast <текст>",
+        "en": "❌ Usage: /broadcast <text>",
+        "de": "❌ Verwendung: /broadcast <Text>",
+    },
+    "admin_broadcast_too_long": {
+        "ru": "❌ Сообщение слишком длинное ({length} символов, макс. {max_length}).",
+        "uk": "❌ Повідомлення занадто довге ({length} символів, макс. {max_length}).",
+        "en": "❌ Message too long ({length} chars, max {max_length}).",
+        "de": "❌ Nachricht zu lang ({length} Zeichen, max. {max_length}).",
+    },
+    "admin_broadcast_confirm": {
+        "ru": "📢 <b>Подтвердите рассылку всем активным пользователям:</b>\n\n{message}",
+        "uk": "📢 <b>Підтвердіть розсилку всім активним користувачам:</b>\n\n{message}",
+        "en": "📢 <b>Confirm broadcast to all active users:</b>\n\n{message}",
+        "de": "📢 <b>Broadcast an alle aktiven Benutzer bestätigen:</b>\n\n{message}",
+    },
+    "admin_unauthorized": {
+        "ru": "❌ Неавторизовано",
+        "uk": "❌ Неавторизовано",
+        "en": "❌ Unauthorized",
+        "de": "❌ Nicht autorisiert",
+    },
+    "admin_no_pending": {
+        "ru": "❌ Нет ожидающей рассылки",
+        "uk": "❌ Немає очікуваної розсилки",
+        "en": "❌ No pending broadcast",
+        "de": "❌ Kein ausstehender Broadcast",
+    },
+    "admin_broadcast_expired": {
+        "ru": "❌ Запрос рассылки истек. Попробуйте снова.",
+        "uk": "❌ Запит розсилки минув. Спробуйте знову.",
+        "en": "❌ Broadcast request expired. Please try again.",
+        "de": "❌ Broadcast-Anfrage abgelaufen. Bitte erneut versuchen.",
+    },
+    "admin_broadcasting": {
+        "ru": "📤 Отправка рассылки…",
+        "uk": "📤 Відправка розсилки…",
+        "en": "📤 Broadcasting…",
+        "de": "📤 Wird gesendet…",
+    },
+    "admin_broadcast_done": {
+        "ru": "✅ Рассылка завершена.\nДоставлено: <b>{success}</b> | Не удалось: <b>{failed}</b>",
+        "uk": "✅ Розсилка завершена.\nДоставлено: <b>{success}</b> | Не вдалось: <b>{failed}</b>",
+        "en": "✅ Broadcast done.\nDelivered: <b>{success}</b> | Failed: <b>{failed}</b>",
+        "de": "✅ Broadcast abgeschlossen.\nZugestellt: <b>{success}</b> | Fehlgeschlagen: <b>{failed}</b>",
+    },
+    "admin_broadcast_cancelled": {
+        "ru": "Рассылка отменена.",
+        "uk": "Розсилку скасовано.",
+        "en": "Broadcast cancelled.",
+        "de": "Broadcast abgebrochen.",
+    },
 }
 
 

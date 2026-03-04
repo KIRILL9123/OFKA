@@ -31,6 +31,7 @@ class _CircuitBreaker:
             return False
         elapsed = time.monotonic() - self._opened_at
         if elapsed >= self.recovery_timeout_seconds:
+            logger.info("Circuit breaker recovered after {elapsed:.1f}s", elapsed=elapsed)
             self._opened_at = None
             self._failure_count = 0
             return False

@@ -86,20 +86,22 @@ async def cmd_broadcast(message: Message) -> None:
         return
 
     text = message.text
+    from bot.core.translations import t
+    
     if text is None:
-        await message.answer("❌ Message text cannot be empty.")
+        await message.answer(t("admin_broadcast_empty", None))
         return
 
     # Strip the /broadcast command prefix
     payload = text.removeprefix("/broadcast").strip()
     if not payload:
-        await message.answer("❌ Usage: /broadcast <text>")
+        await message.answer(t("admin_broadcast_usage", None))
         return
 
     # Validate broadcast message length
     if len(payload) > settings.MAX_MESSAGE_LENGTH:
         await message.answer(
-            f"❌ Message too long ({len(payload)} chars, max {settings.MAX_MESSAGE_LENGTH})."
+            t("admin_broadcast_too_long", None, length=len(payload), max_length=settings.MAX_MESSAGE_LENGTH)
         )
         return
 
@@ -116,8 +118,10 @@ async def cmd_broadcast(message: Message) -> None:
         ]
     )
     
+    from bot.core.translations import t
+    
     await message.answer(
-        f"📢 <b>Confirm broadcast to all active users:</b>\n\n{payload}",
+        t("admin_broadcast_confirm", None, message=payload),
         parse_mode="HTML",
         reply_markup=confirm_keyboard,
     )
@@ -126,28 +130,30 @@ async def cmd_broadcast(message: Message) -> None:
 @router.callback_query(F.data == "broadcast:confirm")
 async def cb_broadcast_confirm(callback: CallbackQuery, bot: Bot) -> None:
     """Confirm and send the broadcast message."""
+    from bot.core.translations import t
+    
     tg_id = callback.from_user.id
     if tg_id != settings.ADMIN_ID:
-        await callback.answer("❌ Unauthorized", show_alert=True)
+        await callback.answer(t("admin_unauthorized", None), show_alert=True)
         return
     
     pending_data = _pending_broadcast.pop(tg_id, None)
     if not pending_data:
-        await callback.answer("❌ No pending broadcast", show_alert=True)
+        await callback.answer(t("admin_no_pending", None), show_alert=True)
         return
     
     payload, timestamp = pending_data
     
     # Check if TTL expired (5 minutes)
     if time.time() - timestamp > BROADCAST_TTL_SECONDS:
-        await callback.answer("❌ Broadcast request expired. Please try again.", show_alert=True)
+        await callback.answer(t("admin_broadcast_expired", None), show_alert=True)
         return
     
-    await callback.message.edit_text("📤 Broadcasting…")
+    await callback.message.edit_text(t("admin_broadcasting", None))
     success, failed = await broadcast_text(bot, payload)
     
     await callback.message.edit_text(
-        f"✅ Broadcast done.\nDelivered: <b>{success}</b> | Failed: <b>{failed}</b>",
+        t("admin_broadcast_done", None, success=success, failed=failed),
         parse_mode="HTML",
     )
     logger.info(
@@ -161,11 +167,13 @@ async def cb_broadcast_confirm(callback: CallbackQuery, bot: Bot) -> None:
 @router.callback_query(F.data == "broadcast:cancel")
 async def cb_broadcast_cancel(callback: CallbackQuery) -> None:
     """Cancel pending broadcast."""
+    from bot.core.translations import t
+    
     tg_id = callback.from_user.id
     if tg_id != settings.ADMIN_ID:
-        await callback.answer("❌ Unauthorized", show_alert=True)
+        await callback.answer(t("admin_unauthorized", None), show_alert=True)
         return
     
     _pending_broadcast.pop(tg_id, None)
     await callback.message.delete()
-    await callback.answer("Broadcast cancelled.")
+    await callback.answer(t("admin_broadcast_cancelled", None))
