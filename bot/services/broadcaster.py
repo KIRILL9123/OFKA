@@ -269,8 +269,16 @@ async def send_game_to_user(
 async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
     """Send a game notification to every active user in their language.
 
+    Uses streaming with yield_per() to efficiently handle large user bases
+    without loading all users into memory at once.
+    
     Returns (success_count, fail_count).
     """
+    success = 0
+    failed = 0
+    deactivated_ids: list[int] = []
+
+    # Stream users in batches of 500 to avoid memory spikes
     async with async_session() as session:
         result = await session.execute(
             select(
@@ -282,42 +290,36 @@ async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
                 User.pref_other,
             ).where(User.is_active.is_(True))
         )
-        users: list[tuple[int, str | None, bool, bool, bool, bool]] = list(
-            result.yield_per(500).tuples().all()  # Use yield_per for memory efficiency with large user bases
-        )
+        
+        # Process users as they stream from the database (batch by batch)
+        async for tg_id, lang, pref_steam, pref_epic, pref_gog, pref_other in result.yield_per(500).tuples():
 
-    success = 0
-    failed = 0
-    deactivated_ids: list[int] = []
+            if not _game_matches_preferences(
+                game,
+                pref_steam,
+                pref_epic,
+                pref_gog,
+                pref_other,
+            ):
+                continue
 
-    for tg_id, lang, pref_steam, pref_epic, pref_gog, pref_other in users:
-        if not _game_matches_preferences(
-            game,
-            pref_steam,
-            pref_epic,
-            pref_gog,
-            pref_other,
-        ):
-            continue
-
-        delivered = await send_game_to_user(bot, tg_id, game, lang)
-        if delivered:
-            success += 1
-        else:
-            failed += 1
-            deactivated_ids.append(tg_id)
-        await asyncio.sleep(SEND_DELAY)
-
-    # Batch-deactivate blocked users
-    if deactivated_ids:
-        async with async_session() as session:
+            delivered = await send_game_to_user(bot, tg_id, game, lang)
+            if delivered:
+                success += 1
+            else:
+                failed += 1
+                deactivated_ids.append(tg_id)
+            await asyncio.sleep(SEND_DELAY)
+        
+        # Batch-deactivate blocked users within same session
+        if deactivated_ids:
             await session.execute(
                 update(User)
                 .where(User.tg_id.in_(deactivated_ids))
                 .values(is_active=False)
             )
             await session.commit()
-        logger.info("Deactivated {count} blocked users", count=len(deactivated_ids))
+            logger.info("Deactivated {count} blocked users", count=len(deactivated_ids))
 
     logger.info(
         "Broadcast complete: {ok} delivered, {fail} failed",

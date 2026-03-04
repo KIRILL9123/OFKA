@@ -21,6 +21,45 @@ _pending_broadcast: dict[int, tuple[str, float]] = {}
 BROADCAST_TTL_SECONDS = 300  # 5 minutes
 
 
+async def _cleanup_expired_broadcasts() -> None:
+    """Background task to clean up expired broadcast requests.
+    
+    Runs periodically to remove stale entries from _pending_broadcast dict.
+    Prevents memory leaks if admin doesn't confirm/cancel requests.
+    """
+    import asyncio
+    while True:
+        try:
+            await asyncio.sleep(60)  # Check every minute
+            now = time.time()
+            expired_ids = [
+                tg_id for tg_id, (_, timestamp) in _pending_broadcast.items()
+                if now - timestamp > BROADCAST_TTL_SECONDS
+            ]
+            for tg_id in expired_ids:
+                _pending_broadcast.pop(tg_id, None)
+                logger.info(
+                    "Auto-cleaned expired broadcast for admin {tg_id}",
+                    tg_id=tg_id,
+                )
+        except Exception as exc:
+            logger.error("Error in _cleanup_expired_broadcasts: {exc}", exc=exc)
+
+
+def _start_cleanup_task() -> None:
+    """Start the background cleanup task for expired broadcasts.
+    
+    Called from main.py during startup.
+    """
+    import asyncio
+    try:
+        asyncio.create_task(_cleanup_expired_broadcasts())
+        logger.info("Started background cleanup task for broadcast TTL")
+    except RuntimeError:
+        # Already in event loop, schedule it differently
+        logger.warning("Could not create cleanup task - event loop may not be ready")
+
+
 def _is_admin(message: Message) -> bool:
     """Verify admin access and log unauthorized attempts."""
     is_authorized = message.from_user.id == settings.ADMIN_ID

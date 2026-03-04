@@ -135,6 +135,10 @@ async def on_startup(bot: Bot) -> None:
 
     await asyncio.to_thread(run_alembic_migrations)
     logger.info("Database migrations applied")
+    
+    # Start background cleanup task for broadcast TTL
+    from bot.handlers.admin import _start_cleanup_task
+    _start_cleanup_task()
 
     me = await bot.me()
     logger.info("Bot started as @{username}", username=me.username)
