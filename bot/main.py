@@ -138,7 +138,7 @@ async def on_startup(bot: Bot) -> None:
     
     # Start background cleanup task for broadcast TTL
     from bot.handlers.admin import _start_cleanup_task
-    _start_cleanup_task()
+    await _start_cleanup_task()
 
     me = await bot.me()
     logger.info("Bot started as @{username}", username=me.username)
@@ -158,6 +158,10 @@ async def on_startup(bot: Bot) -> None:
 
 async def on_shutdown(bot: Bot) -> None:
     """Clean up on shutdown."""
+    # Stop cleanup task gracefully
+    from bot.handlers.admin import stop_cleanup_task
+    await stop_cleanup_task()
+    
     await engine.dispose()
     logger.info("Bot shut down gracefully")
 

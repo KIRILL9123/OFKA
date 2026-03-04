@@ -222,6 +222,24 @@ _TEXTS: dict[str, dict[str, str]] = {
         "en": "Unknown",
         "de": "Unbekannt",
     },
+    "date_today": {
+        "ru": "Сегодня",
+        "uk": "Сьогодні",
+        "en": "Today",
+        "de": "Heute",
+    },
+    "date_tomorrow": {
+        "ru": "Завтра",
+        "uk": "Завтра",
+        "en": "Tomorrow",
+        "de": "Morgen",
+    },
+    "date_days_left": {
+        "ru": "дней осталось",
+        "uk": "днів залишилось",
+        "en": "days left",
+        "de": "Tage verbleibend",
+    },
     "claim_button": {
         "ru": "🎁 Забрать игру",
         "uk": "🎁 Забрати гру",

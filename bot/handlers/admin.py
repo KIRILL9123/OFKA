@@ -16,9 +16,8 @@ from bot.services.broadcaster import broadcast_text
 
 router = Router(name="admin")
 
-# For storing pending broadcast message with TTL (5 minutes)
-_pending_broadcast: dict[int, tuple[str, float]] = {}
-BROADCAST_TTL_SECONDS = 300  # 5 minutes
+# Flag to control cleanup task lifecycle
+_cleanup_running = True
 
 
 async def _cleanup_expired_broadcasts() -> None:
@@ -26,11 +25,15 @@ async def _cleanup_expired_broadcasts() -> None:
     
     Runs periodically to remove stale entries from _pending_broadcast dict.
     Prevents memory leaks if admin doesn't confirm/cancel requests.
+    Stops gracefully when _cleanup_running is set to False.
     """
     import asyncio
-    while True:
+    while _cleanup_running:
         try:
             await asyncio.sleep(60)  # Check every minute
+            if not _cleanup_running:
+                break
+            
             now = time.time()
             expired_ids = [
                 tg_id for tg_id, (_, timestamp) in _pending_broadcast.items()
@@ -46,18 +49,20 @@ async def _cleanup_expired_broadcasts() -> None:
             logger.error("Error in _cleanup_expired_broadcasts: {exc}", exc=exc)
 
 
-def _start_cleanup_task() -> None:
+async def _start_cleanup_task() -> None:
     """Start the background cleanup task for expired broadcasts.
     
-    Called from main.py during startup.
+    Must be called as: await _start_cleanup_task() from async context.
     """
-    import asyncio
-    try:
-        asyncio.create_task(_cleanup_expired_broadcasts())
-        logger.info("Started background cleanup task for broadcast TTL")
-    except RuntimeError:
-        # Already in event loop, schedule it differently
-        logger.warning("Could not create cleanup task - event loop may not be ready")
+    asyncio.create_task(_cleanup_expired_broadcasts())
+    logger.info("Started background cleanup task for broadcast TTL")
+
+
+async def stop_cleanup_task() -> None:
+    """Stop the cleanup task gracefully during shutdown."""
+    global _cleanup_running
+    _cleanup_running = False
+    logger.info("Stopped background cleanup task")
 
 
 def _is_admin(message: Message) -> bool:

@@ -221,6 +221,7 @@ async def cmd_start(message: Message) -> None:
     lang, _, _, _, _ = await _get_user_settings(tg_id)
 
     if reactivated:
+        logger.info("User {tg_id} resubscribed", tg_id=tg_id)
         await message.answer(
             t("resubscribed", lang),
             parse_mode="HTML",

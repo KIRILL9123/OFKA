@@ -50,29 +50,25 @@ def _format_platform_names(platforms_raw: str | None) -> str:
     
     formatted = []
     for platform in platforms:
-        # Exact match first (avoid "steam" matching "steamworks")
+        # Exact match (platforms already lowercased and stripped above)
         if platform in platform_emoji_map:
             formatted.append(platform_emoji_map[platform])
         else:
-            # Check for common variations (e.g., "steam" might be "steam " with spaces)
-            platform_trimmed = platform.strip()
-            if platform_trimmed in platform_emoji_map:
-                formatted.append(platform_emoji_map[platform_trimmed])
-            else:
-                # Fallback: capitalize and add generic emoji
-                formatted.append(f"🎮 {platform.title()}")
+            # Fallback: capitalize and add generic emoji
+            formatted.append(f"🎮 {platform.title()}")
     
     return ", ".join(formatted) if formatted else "🎮 Unknown"
 
 
-def _format_end_date(end_date_raw: str | None) -> str | None:
+def _format_end_date(end_date_raw: str | None, lang: str | None = None) -> str | None:
     """Parse end_date and return human-readable format with days remaining.
     
+    Supports localization for relative dates (today, tomorrow).
     Returns None for expired games (to signal filtering).
     Tries common date formats. Fails gracefully to raw value if parsing unsuccessful.
     """
     if not end_date_raw or end_date_raw == "N/A":
-        return "Unknown"
+        return t("unknown_value", lang)
     
     try:
         # Try to parse common date formats (safe formats only, avoiding locale-dependent ones)
@@ -85,11 +81,11 @@ def _format_end_date(end_date_raw: str | None) -> str | None:
                 if delta < 0:
                     return None  # Signal to skip expired games
                 elif delta == 0:
-                    return "Today"
+                    return t("date_today", lang)
                 elif delta == 1:
-                    return "Tomorrow"
+                    return t("date_tomorrow", lang)
                 else:
-                    return f"{end_date_raw} ({delta} days left)"
+                    return f"{end_date_raw} ({delta} {t('date_days_left', lang)})"
             except ValueError:
                 continue
     except Exception:
@@ -168,7 +164,7 @@ def build_game_caption(game: dict[str, Any], lang: str | None) -> str:
     
     # Format end date with days remaining
     end_date_raw = game.get("end_date", "")
-    end_date = _format_end_date(end_date_raw) if (end_date_raw and end_date_raw != "N/A") else unknown
+    end_date = _format_end_date(end_date_raw, lang) if (end_date_raw and end_date_raw != "N/A") else unknown
     
     # Build description section: truncate if too long
     description = (game.get("description") or "").strip()
@@ -331,32 +327,21 @@ async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
 
 async def broadcast_text(bot: Bot, text: str) -> tuple[int, int]:
     """Send a plain text message to every active user.
-
+    
+    Uses streaming with yield_per to efficiently handle large user bases.
     Returns (success_count, fail_count).
     """
-    async with async_session() as session:
-        result = await session.execute(
-            select(User.tg_id).where(User.is_active.is_(True))
-        )
-        user_ids: list[int] = list(result.scalars().all())
-
     success = 0
     failed = 0
     deactivated_ids: list[int] = []
 
-    for tg_id in user_ids:
-        try:
-            await bot.send_message(
-                chat_id=tg_id,
-                text=text,
-                parse_mode=ParseMode.HTML,
-            )
-            success += 1
-        except TelegramForbiddenError:
-            failed += 1
-            deactivated_ids.append(tg_id)
-        except TelegramRetryAfter as exc:
-            await asyncio.sleep(exc.retry_after)
+    # Stream users in batches to avoid loading all into memory
+    async with async_session() as session:
+        result = await session.execute(
+            select(User.tg_id).where(User.is_active.is_(True))
+        )
+        
+        async for (tg_id,) in result.yield_per(500).tuples():
             try:
                 await bot.send_message(
                     chat_id=tg_id,
@@ -364,16 +349,28 @@ async def broadcast_text(bot: Bot, text: str) -> tuple[int, int]:
                     parse_mode=ParseMode.HTML,
                 )
                 success += 1
-            except Exception:
+            except TelegramForbiddenError:
                 failed += 1
-        except Exception as exc:
-            logger.error("broadcast_text error for {tg_id}: {exc}", tg_id=tg_id, exc=exc)
-            failed += 1
+                deactivated_ids.append(tg_id)
+            except TelegramRetryAfter as exc:
+                await asyncio.sleep(exc.retry_after)
+                try:
+                    await bot.send_message(
+                        chat_id=tg_id,
+                        text=text,
+                        parse_mode=ParseMode.HTML,
+                    )
+                    success += 1
+                except Exception:
+                    failed += 1
+            except Exception as exc:
+                logger.error("broadcast_text error for {tg_id}: {exc}", tg_id=tg_id, exc=exc)
+                failed += 1
 
-        await asyncio.sleep(SEND_DELAY)
-
-    if deactivated_ids:
-        async with async_session() as session:
+            await asyncio.sleep(SEND_DELAY)
+        
+        # Batch-deactivate blocked users within same session
+        if deactivated_ids:
             await session.execute(
                 update(User)
                 .where(User.tg_id.in_(deactivated_ids))
