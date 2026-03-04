@@ -22,7 +22,10 @@ SEND_DELAY = 0.05
 
 
 def _format_platform_names(platforms_raw: str | None) -> str:
-    """Format platform names with emojis and clean text."""
+    """Format platform names with emojis and clean text.
+    
+    Handles duplicates and matches exact platform names only.
+    """
     if not platforms_raw or not platforms_raw.strip():
         return "🎮 Unknown"
     
@@ -36,49 +39,49 @@ def _format_platform_names(platforms_raw: str | None) -> str:
         "origin": "🎮 Origin",
     }
     
+    # Split, lowercase, deduplicate
     platforms = [p.strip().lower() for p in platforms_raw.split(",")]
     platforms = list(dict.fromkeys(platforms))  # Remove duplicates
     
     formatted = []
     for platform in platforms:
-        # Try exact match first
+        # Exact match first (avoid "steam" matching "steamworks")
         if platform in platform_emoji_map:
             formatted.append(platform_emoji_map[platform])
         else:
-            # Try partial match
-            matched = False
-            for key, emoji_text in platform_emoji_map.items():
-                if key in platform:
-                    formatted.append(emoji_text)
-                    matched = True
-                    break
-            if not matched:
+            # Check for common variations (e.g., "steam" might be "steam " with spaces)
+            platform_trimmed = platform.strip()
+            if platform_trimmed in platform_emoji_map:
+                formatted.append(platform_emoji_map[platform_trimmed])
+            else:
                 # Fallback: capitalize and add generic emoji
                 formatted.append(f"🎮 {platform.title()}")
     
-    return ", ".join(formatted)
+    return ", ".join(formatted) if formatted else "🎮 Unknown"
 
 
 def _format_end_date(end_date_raw: str | None) -> str:
-    """Parse end_date and return human-readable format with days remaining."""
+    """Parse end_date and return human-readable format with days remaining.
+    
+    Tries common date formats. Fails gracefully to raw value if parsing unsuccessful.
+    """
     if not end_date_raw or end_date_raw == "N/A":
         return "Unknown"
     
     try:
-        # Try to parse common date formats
-        # Format: "2026-03-15" or "March 15, 2026"
-        for fmt in ["%Y-%m-%d", "%B %d, %Y", "%d.%m.%Y", "%d/%m/%Y"]:
+        # Try to parse common date formats (safe formats only, avoiding locale-dependent ones)
+        for fmt in ["%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"]:
             try:
                 end = datetime.strptime(end_date_raw.strip(), fmt)
                 now = datetime.now()
                 delta = (end - now).days
                 
                 if delta < 0:
-                    return f"Expired"
+                    return "Expired"
                 elif delta == 0:
-                    return f"Today"
+                    return "Today"
                 elif delta == 1:
-                    return f"Tomorrow"
+                    return "Tomorrow"
                 else:
                     return f"{end_date_raw} ({delta} days left)"
             except ValueError:
@@ -86,7 +89,7 @@ def _format_end_date(end_date_raw: str | None) -> str:
     except Exception:
         pass
     
-    # Fallback to raw value
+    # Fallback to raw value if no format matched
     return end_date_raw
 
 
@@ -132,12 +135,18 @@ def _game_matches_preferences(
 def build_game_caption(game: dict[str, Any], lang: str | None) -> str:
     """Format an HTML caption for a game giveaway notification.
     
-    Handles N/A values gracefully, truncates long descriptions, formats dates and platforms.
+    Handles N/A values gracefully, truncates long descriptions and titles,
+    formats dates and platforms with emojis.
     """
     unknown = t("unknown_value", lang)
     MAX_DESCRIPTION_LENGTH = 800
+    MAX_TITLE_LENGTH = 200
     
+    # Truncate title to prevent caption from exceeding 1024 char limit
     title = game.get("title", unknown)
+    if len(title) > MAX_TITLE_LENGTH:
+        title = title[:MAX_TITLE_LENGTH].rstrip() + "…"
+    
     worth = game.get("worth", "N/A")
     if worth == "N/A":
         worth = unknown

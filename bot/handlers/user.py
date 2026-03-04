@@ -469,8 +469,9 @@ async def cb_unsubscribe(callback: CallbackQuery) -> None:
     logger.info("User {tg_id} unsubscribed from notifications", tg_id=tg_id)
     
     await callback.message.delete()
-    await callback.message.answer(
-        t("unsubscribe_confirmed", lang),
+    await callback.bot.send_message(
+        chat_id=tg_id,
+        text=t("unsubscribe_confirmed", lang),
         parse_mode="HTML",
     )
     await callback.answer()

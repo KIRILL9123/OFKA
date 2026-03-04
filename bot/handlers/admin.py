@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -15,8 +16,9 @@ from bot.services.broadcaster import broadcast_text
 
 router = Router(name="admin")
 
-# For storing pending broadcast message
-_pending_broadcast: dict[int, str] = {}
+# For storing pending broadcast message with TTL (5 minutes)
+_pending_broadcast: dict[int, tuple[str, float]] = {}
+BROADCAST_TTL_SECONDS = 300  # 5 minutes
 
 
 def _is_admin(message: Message) -> bool:
@@ -101,9 +103,9 @@ async def cmd_broadcast(message: Message) -> None:
         )
         return
 
-    # Store pending broadcast and ask for confirmation
+    # Store pending broadcast with TTL and ask for confirmation
     tg_id = message.from_user.id
-    _pending_broadcast[tg_id] = payload
+    _pending_broadcast[tg_id] = (payload, time.time())
     
     confirm_keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -129,9 +131,16 @@ async def cb_broadcast_confirm(callback: CallbackQuery, bot: Bot) -> None:
         await callback.answer("❌ Unauthorized", show_alert=True)
         return
     
-    payload = _pending_broadcast.pop(tg_id, None)
-    if not payload:
+    pending_data = _pending_broadcast.pop(tg_id, None)
+    if not pending_data:
         await callback.answer("❌ No pending broadcast", show_alert=True)
+        return
+    
+    payload, timestamp = pending_data
+    
+    # Check if TTL expired (5 minutes)
+    if time.time() - timestamp > BROADCAST_TTL_SECONDS:
+        await callback.answer("❌ Broadcast request expired. Please try again.", show_alert=True)
         return
     
     await callback.message.edit_text("📤 Broadcasting…")
