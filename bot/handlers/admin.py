@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+
+import asyncio
 import time
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
@@ -27,7 +29,6 @@ async def _cleanup_expired_broadcasts() -> None:
     Prevents memory leaks if admin doesn't confirm/cancel requests.
     Stops gracefully when _cleanup_running is set to False.
     """
-    import asyncio
     while _cleanup_running:
         try:
             await asyncio.sleep(60)  # Check every minute
