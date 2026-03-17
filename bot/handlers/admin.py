@@ -166,9 +166,7 @@ async def cmd_broadcast(message: Message) -> None:
             ]
         ]
     )
-    
-    from bot.core.translations import t
-    
+
     await message.answer(
         t("admin_broadcast_confirm", None, message=payload),
         parse_mode="HTML",

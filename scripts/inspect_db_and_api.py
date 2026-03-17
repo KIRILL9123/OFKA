@@ -1,11 +1,37 @@
 #!/usr/bin/env python3
 """Quick inspection: list DB tables, counts and check GamerPower API."""
+from __future__ import annotations
+
+import argparse
 import json
 import sqlite3
 import urllib.request
 import sys
+from pathlib import Path
 
-DB_PATH = "/app/data/bot.db"
+
+def _sqlite_path_from_url(database_url: str) -> str:
+    """Extract sqlite file path from SQLAlchemy URL.
+
+    Supports sqlite:///... and sqlite+aiosqlite:///... forms.
+    """
+    for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
+        if database_url.startswith(prefix):
+            return database_url.removeprefix(prefix)
+    return "data/bot.db"
+
+
+def _resolve_db_path(cli_db_path: str | None) -> str:
+    if cli_db_path:
+        return cli_db_path
+
+    try:
+        from bot.core.database import get_effective_database_url
+
+        raw_path = _sqlite_path_from_url(get_effective_database_url())
+        return str(Path(raw_path).expanduser().resolve())
+    except Exception:
+        return str(Path("data/bot.db").resolve())
 
 def list_tables(conn):
     cur = conn.cursor()
@@ -31,9 +57,14 @@ def check_api(url):
         return f"ERROR: {exc}"
 
 def main():
-    print("DB path:", DB_PATH)
+    parser = argparse.ArgumentParser(description="Inspect local DB tables and GamerPower API")
+    parser.add_argument("--db-path", dest="db_path", help="Path to sqlite database file")
+    args = parser.parse_args()
+
+    db_path = _resolve_db_path(args.db_path)
+    print("DB path:", db_path)
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(db_path)
     except Exception as exc:
         print("Cannot open DB:", exc)
         sys.exit(2)

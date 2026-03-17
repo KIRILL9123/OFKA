@@ -13,7 +13,6 @@ from aiogram.types import (
 )
 from loguru import logger
 from sqlalchemy import select, update
-from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 
 from bot.core.config import settings
 from bot.core.database import async_session
