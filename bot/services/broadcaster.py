@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from datetime import datetime
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
@@ -16,9 +15,11 @@ from sqlalchemy import select, update
 from bot.core.database import async_session
 from bot.core.translations import t
 from bot.models.models import User
+from bot.utils.dates import format_end_date
 
 # Delay between messages to stay under Telegram rate limits (~20 msg/sec)
 SEND_DELAY = 0.05
+MAX_RETRY_ATTEMPTS = 5
 
 
 def _format_platform_names(platforms_raw: str | None) -> str:
@@ -61,38 +62,8 @@ def _format_platform_names(platforms_raw: str | None) -> str:
 
 
 def _format_end_date(end_date_raw: str | None, lang: str | None = None) -> str | None:
-    """Parse end_date and return human-readable format with days remaining.
-    
-    Supports localization for relative dates (today, tomorrow).
-    Returns None for expired games (to signal filtering).
-    Tries common date formats. Fails gracefully to raw value if parsing unsuccessful.
-    """
-    if not end_date_raw or end_date_raw == "N/A":
-        return t("unknown_value", lang)
-    
-    try:
-        # Try to parse common date formats (safe formats only, avoiding locale-dependent ones)
-        for fmt in ["%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"]:
-            try:
-                end = datetime.strptime(end_date_raw.strip(), fmt)
-                now = datetime.now()
-                delta = (end - now).days
-                
-                if delta < 0:
-                    return None  # Signal to skip expired games
-                elif delta == 0:
-                    return t("date_today", lang)
-                elif delta == 1:
-                    return t("date_tomorrow", lang)
-                else:
-                    return f"{end_date_raw} ({delta} {t('date_days_left', lang)})"
-            except ValueError:
-                continue
-    except Exception:
-        pass
-    
-    # Fallback to raw value if no format matched
-    return end_date_raw
+    """Backward-compatible wrapper around shared date formatter."""
+    return format_end_date(end_date_raw, lang)
 
 
 def _game_matches_preferences(
@@ -208,58 +179,70 @@ async def send_game_to_user(
     keyboard = build_game_keyboard(game, lang)
     thumbnail = game.get("thumbnail")
 
-    try:
-        if thumbnail:
-            try:
-                photo = URLInputFile(thumbnail)
-                await bot.send_photo(
-                    chat_id=tg_id,
-                    photo=photo,
-                    caption=caption,
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=keyboard,
-                )
-            except Exception as img_exc:
-                # Fallback to text message if image fails
-                logger.warning(
-                    "Failed to load image for user {tg_id}, sending text instead: {exc}",
-                    tg_id=tg_id,
-                    exc=img_exc,
-                )
+    for attempt in range(1, MAX_RETRY_ATTEMPTS + 1):
+        try:
+            if thumbnail:
+                try:
+                    photo = URLInputFile(thumbnail)
+                    await bot.send_photo(
+                        chat_id=tg_id,
+                        photo=photo,
+                        caption=caption,
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=keyboard,
+                    )
+                except Exception as img_exc:
+                    # Fallback to text message if image fails
+                    logger.warning(
+                        "Failed to load image for user {tg_id}, sending text instead: {exc}",
+                        tg_id=tg_id,
+                        exc=img_exc,
+                    )
+                    await bot.send_message(
+                        chat_id=tg_id,
+                        text=caption,
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=keyboard,
+                    )
+            else:
                 await bot.send_message(
                     chat_id=tg_id,
                     text=caption,
                     parse_mode=ParseMode.HTML,
                     reply_markup=keyboard,
                 )
-        else:
-            await bot.send_message(
-                chat_id=tg_id,
-                text=caption,
-                parse_mode=ParseMode.HTML,
-                reply_markup=keyboard,
+            return True
+
+        except TelegramForbiddenError:
+            logger.info("User {tg_id} blocked the bot, deactivating", tg_id=tg_id)
+            return False
+
+        except TelegramRetryAfter as exc:
+            if attempt >= MAX_RETRY_ATTEMPTS:
+                logger.error(
+                    "Rate limit persisted for user {tg_id} after {attempts} retries",
+                    tg_id=tg_id,
+                    attempts=MAX_RETRY_ATTEMPTS,
+                )
+                return True
+            logger.warning(
+                "Rate limited for user {tg_id}, sleeping {retry}s (attempt {attempt}/{max_attempts})",
+                tg_id=tg_id,
+                retry=exc.retry_after,
+                attempt=attempt,
+                max_attempts=MAX_RETRY_ATTEMPTS,
             )
-        return True
+            await asyncio.sleep(exc.retry_after)
 
-    except TelegramForbiddenError:
-        logger.info("User {tg_id} blocked the bot, deactivating", tg_id=tg_id)
-        return False
+        except Exception as exc:
+            logger.error(
+                "Failed to send game to {tg_id}: {exc}",
+                tg_id=tg_id,
+                exc=exc,
+            )
+            return True  # Don't deactivate on transient errors
 
-    except TelegramRetryAfter as exc:
-        logger.warning(
-            "Rate limited, sleeping {retry}s",
-            retry=exc.retry_after,
-        )
-        await asyncio.sleep(exc.retry_after)
-        return await send_game_to_user(bot, tg_id, game, lang)
-
-    except Exception as exc:
-        logger.error(
-            "Failed to send game to {tg_id}: {exc}",
-            tg_id=tg_id,
-            exc=exc,
-        )
-        return True  # Don't deactivate on transient errors
+    return True
 
 
 async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:

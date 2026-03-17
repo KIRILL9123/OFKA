@@ -20,6 +20,7 @@ from bot.handlers import admin, user
 from bot.models.models import Game
 from bot.services.api_client import fetch_free_games
 from bot.services.broadcaster import broadcast_game
+from bot.utils.dates import format_end_date
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -94,8 +95,7 @@ async def check_new_games(bot: Bot) -> None:
         # Skip expired games
         end_date_raw = game.get("end_date", "")
         if end_date_raw and end_date_raw != "N/A":
-            from bot.services.broadcaster import _format_end_date
-            formatted_date = _format_end_date(end_date_raw)
+            formatted_date = format_end_date(end_date_raw)
             if formatted_date is None:  # Expired
                 logger.info("Skipping expired game: {title}", title=game.get("title"))
                 continue

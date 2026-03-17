@@ -56,6 +56,10 @@ async def _is_rate_limited(tg_id: int) -> bool:
 
         # Remove old timestamps
         _user_rate_limit[tg_id] = [ts for ts in _user_rate_limit[tg_id] if ts > cutoff]
+        if not _user_rate_limit[tg_id]:
+            del _user_rate_limit[tg_id]
+            _user_rate_limit[tg_id] = [now]
+            return False
 
         if len(_user_rate_limit[tg_id]) >= settings.USER_RATE_LIMIT_PER_MINUTE:
             return True

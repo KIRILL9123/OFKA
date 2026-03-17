@@ -18,6 +18,10 @@ from bot.services.broadcaster import broadcast_text
 
 router = Router(name="admin")
 
+# Pending broadcast payload per admin user id: {tg_id: (message, created_ts)}
+_pending_broadcast: dict[int, tuple[str, float]] = {}
+BROADCAST_TTL_SECONDS = 300
+
 # Flag to control cleanup task lifecycle
 _cleanup_running = True
 
