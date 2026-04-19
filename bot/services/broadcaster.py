@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from aiogram import Bot
@@ -21,6 +22,11 @@ from bot.utils.dates import format_end_date
 # Delay between messages to stay under Telegram rate limits (~20 msg/sec)
 SEND_DELAY = 0.05
 MAX_RETRY_ATTEMPTS = 5
+MAX_CAPTION_LENGTH = 1024
+
+_STEAM_RE = re.compile(r"\bsteam\b")
+_EPIC_RE = re.compile(r"\bepic\b")
+_GOG_RE = re.compile(r"\bgog\b")
 
 
 def _format_platform_names(platforms_raw: str | None) -> str:
@@ -92,11 +98,10 @@ def _game_matches_preferences(
         if p_clean and p_clean not in seen_platforms:
             seen_platforms.add(p_clean)
             platform_list.append(p_clean)
-    platforms_normalized = ", ".join(platform_list)
 
-    has_steam = any("steam" in p for p in platform_list)
-    has_epic = any("epic" in p for p in platform_list)
-    has_gog = any("gog" in p for p in platform_list)
+    has_steam = any(_STEAM_RE.search(p) for p in platform_list)
+    has_epic = any(_EPIC_RE.search(p) for p in platform_list)
+    has_gog = any(_GOG_RE.search(p) for p in platform_list)
 
     known_hit = (
         (pref_steam and has_steam)
@@ -106,8 +111,11 @@ def _game_matches_preferences(
     if known_hit:
         return True
 
-    # "Other" means any platform that is not Steam/Epic/GOG.
-    has_other = platforms_normalized and not (has_steam or has_epic or has_gog)
+    # "Other" means at least one token that doesn't look like Steam/Epic/GOG.
+    has_other = any(
+        not (_STEAM_RE.search(p) or _EPIC_RE.search(p) or _GOG_RE.search(p))
+        for p in platform_list
+    )
     return pref_other and has_other
 
 
@@ -144,7 +152,7 @@ def build_game_caption(game: dict[str, Any], lang: str | None) -> str:
         description = description[:MAX_DESCRIPTION_LENGTH].rstrip() + "..."
     description_section = f"\n\n<i>{description}</i>" if description else ""
     
-    return t(
+    caption = t(
         "game_caption",
         lang,
         title=title,
@@ -153,6 +161,41 @@ def build_game_caption(game: dict[str, Any], lang: str | None) -> str:
         end_date=end_date,
         description_section=description_section,
     )
+
+    if len(caption) <= MAX_CAPTION_LENGTH:
+        return caption
+
+    # First, drop description completely if needed.
+    caption = t(
+        "game_caption",
+        lang,
+        title=title,
+        worth=worth,
+        platforms=platforms,
+        end_date=end_date,
+        description_section="",
+    )
+    if len(caption) <= MAX_CAPTION_LENGTH:
+        return caption
+
+    # If still too long, trim title further to stay within Telegram caption limit.
+    overflow = len(caption) - MAX_CAPTION_LENGTH
+    if overflow > 0:
+        min_title_len = 16
+        keep_len = max(min_title_len, len(title) - overflow - 1)
+        if keep_len < len(title):
+            title = title[:keep_len].rstrip() + "…"
+
+    caption = t(
+        "game_caption",
+        lang,
+        title=title,
+        worth=worth,
+        platforms=platforms,
+        end_date=end_date,
+        description_section="",
+    )
+    return caption[:MAX_CAPTION_LENGTH]
 
 
 def _build_action_keyboard(

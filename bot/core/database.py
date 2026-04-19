@@ -2,11 +2,7 @@
 
 from pathlib import Path
 
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from bot.core.config import settings
 
@@ -23,7 +19,6 @@ def get_effective_database_url() -> str:
         return f"sqlite+aiosqlite:///{local_db_path.as_posix()}"
 
     if database_url.startswith("sqlite+aiosqlite:///") and "///:" not in database_url:
-        # Relative sqlite path -> make it absolute from project root for stable startup.
         project_root = Path(__file__).resolve().parents[2]
         relative_path = database_url.removeprefix("sqlite+aiosqlite:///")
         local_db_path = (project_root / relative_path).resolve()

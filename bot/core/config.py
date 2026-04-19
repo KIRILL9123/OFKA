@@ -1,5 +1,7 @@
 """Application configuration loaded from environment variables."""
 
+import re
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -12,30 +14,27 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
     )
 
-    BOT_TOKEN: str
-
-    @field_validator("BOT_TOKEN")
-    @classmethod
-    def validate_bot_token(cls, v: str) -> str:
-        import re
-        if not re.match(r"^\d+:[A-Za-z0-9_-]+$", v):
-            raise ValueError("Invalid bot token format")
-        return v
-    ADMIN_ID: int
+    BOT_TOKEN: str = "1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ"
+    ADMIN_ID: int = 123456789
     DATABASE_URL: str = "sqlite+aiosqlite:///data/bot.db"
     CHECK_INTERVAL_MINUTES: int = 15
-    # Security settings
-    MAX_CALLBACK_LENGTH: int = 256  # Prevent oversized callback data
-    MAX_MESSAGE_LENGTH: int = 4096  # Telegram HTML message limit
-    USER_RATE_LIMIT_PER_MINUTE: int = 30  # Max commands per user per minute
-    SPAM_COOLDOWN_SECONDS: int = 1  # Cooldown between messages to same user
+    MAX_CALLBACK_LENGTH: int = 256
+    MAX_MESSAGE_LENGTH: int = 4096
+    USER_RATE_LIMIT_PER_MINUTE: int = 30
+    SPAM_COOLDOWN_SECONDS: int = 1
     GAMERPOWER_API_URL: str = (
         "https://www.gamerpower.com/api/filter"
         "?platform=pc&type=game&sort-by=date"
     )
 
+    @field_validator("BOT_TOKEN")
+    @classmethod
+    def validate_bot_token(cls, value: str) -> str:
+        if not re.match(r"^\d+:[A-Za-z0-9_-]+$", value):
+            raise ValueError("Invalid bot token format")
+        return value
+
     def __repr__(self) -> str:
-        """Override repr to hide sensitive tokens in logs."""
         return (
             f"Settings("
             f"BOT_TOKEN={self.BOT_TOKEN[:10]}***, "

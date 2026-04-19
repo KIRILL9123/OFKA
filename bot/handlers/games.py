@@ -71,7 +71,7 @@ async def cmd_games(message: Message) -> None:
 @router.callback_query(F.data.startswith("game:claim:"))
 async def cb_game_claim(callback: CallbackQuery) -> None:
     """Mark game as claimed for a user."""
-    from bot.handlers.user import _get_or_create_user
+    from bot.handlers.user import _get_or_create_user, _is_rate_limited
 
     if callback.data is None:
         await callback.answer()
@@ -83,6 +83,11 @@ async def cb_game_claim(callback: CallbackQuery) -> None:
         return
 
     tg_id = callback.from_user.id
+    if await _is_rate_limited(tg_id):
+        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+        await callback.answer(t("rate_limit_message", lang), show_alert=False)
+        return
+
     lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
     try:
         await _upsert_user_game_state(tg_id, game_id, "claimed")
@@ -95,7 +100,7 @@ async def cb_game_claim(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("game:skip:"))
 async def cb_game_skip(callback: CallbackQuery) -> None:
     """Mark game as skipped for a user."""
-    from bot.handlers.user import _get_or_create_user
+    from bot.handlers.user import _get_or_create_user, _is_rate_limited
 
     if callback.data is None:
         await callback.answer()
@@ -107,6 +112,11 @@ async def cb_game_skip(callback: CallbackQuery) -> None:
         return
 
     tg_id = callback.from_user.id
+    if await _is_rate_limited(tg_id):
+        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+        await callback.answer(t("rate_limit_message", lang), show_alert=False)
+        return
+
     lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
     try:
         await _upsert_user_game_state(tg_id, game_id, "skipped")
@@ -119,7 +129,7 @@ async def cb_game_skip(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("game:remind:"))
 async def cb_game_remind(callback: CallbackQuery) -> None:
     """Set reminder state for a user and game."""
-    from bot.handlers.user import _get_or_create_user
+    from bot.handlers.user import _get_or_create_user, _is_rate_limited
 
     if callback.data is None:
         await callback.answer()
@@ -131,6 +141,11 @@ async def cb_game_remind(callback: CallbackQuery) -> None:
         return
 
     tg_id = callback.from_user.id
+    if await _is_rate_limited(tg_id):
+        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+        await callback.answer(t("rate_limit_message", lang), show_alert=False)
+        return
+
     lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
     try:
         await _upsert_user_game_state(

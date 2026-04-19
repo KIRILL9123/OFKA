@@ -16,6 +16,7 @@ API_TIMEOUT = aiohttp.ClientTimeout(total=20)
 MAX_RETRIES = 3
 BACKOFF_BASE_SECONDS = 1.0
 BACKOFF_MAX_SECONDS = 8.0
+API_HEADERS = {"User-Agent": "OFKA-Bot/1.0"}
 
 _games_cache: list[dict] = []
 _cache_updated_at: float = 0.0
@@ -74,7 +75,7 @@ async def fetch_free_games() -> list[dict[str, Any]]:
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            async with aiohttp.ClientSession(timeout=API_TIMEOUT) as session:
+            async with aiohttp.ClientSession(timeout=API_TIMEOUT, headers=API_HEADERS) as session:
                 async with session.get(settings.GAMERPOWER_API_URL) as resp:
                     # 201 means "no active giveaways" per API docs
                     if resp.status == 201:

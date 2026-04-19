@@ -16,8 +16,7 @@ COPY . .
 
 RUN mkdir -p /app/data/logs
 
-# Run as non-root for security
-RUN adduser -D botuser && chown -R botuser /app
-USER botuser
+# Keep root runtime here because a mounted Docker volume at /app/data
+# may be owned by root and break log/database writes for non-root users.
 
 CMD ["python", "-m", "bot.main"]
