@@ -16,7 +16,7 @@ from sqlalchemy import select
 
 from bot.core.config import settings
 from bot.core.database import async_session, engine, get_effective_database_url
-from bot.handlers import admin, user
+from bot.handlers import admin, games, user
 from bot.models.models import Game
 from bot.services.api_client import fetch_free_games
 from bot.services.broadcaster import broadcast_game
@@ -79,6 +79,7 @@ async def check_new_games(bot: Bot) -> None:
                     Game(
                         external_id=external_id,
                         title=games_by_external_id[external_id].get("title", "Unknown"),
+                        worth=games_by_external_id[external_id].get("worth"),
                     )
                     for external_id in new_ids
                 ]
@@ -138,7 +139,9 @@ async def on_startup(bot: Bot) -> None:
     
     # Start background cleanup task for broadcast TTL
     from bot.handlers.admin import _start_cleanup_task
+    from bot.handlers.user import start_rate_limit_cleanup
     await _start_cleanup_task()
+    await start_rate_limit_cleanup()
 
     me = await bot.me()
     logger.info("Bot started as @{username}", username=me.username)
@@ -160,7 +163,9 @@ async def on_shutdown(bot: Bot) -> None:
     """Clean up on shutdown."""
     # Stop cleanup task gracefully
     from bot.handlers.admin import stop_cleanup_task
+    from bot.handlers.user import stop_rate_limit_cleanup
     await stop_cleanup_task()
+    await stop_rate_limit_cleanup()
     
     await engine.dispose()
     logger.info("Bot shut down gracefully")
@@ -173,6 +178,7 @@ async def main() -> None:
 
     # Register routers
     dp.include_router(user.router)
+    dp.include_router(games.router)
     dp.include_router(admin.router)
 
     # Lifecycle hooks

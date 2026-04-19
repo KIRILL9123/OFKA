@@ -13,11 +13,8 @@ def test_cb_unsubscribe_sends_message_via_bot_after_delete(monkeypatch) -> None:
     async def fake_not_limited(_: int) -> bool:
         return False
 
-    async def fake_ensure_user_exists(_: int) -> tuple[bool, bool]:
-        return False, False
-
-    async def fake_get_user_settings(_: int) -> tuple[str | None, bool, bool, bool, bool]:
-        return "en", True, True, False, False
+    async def fake_get_or_create_user(_: int) -> tuple[str | None, bool, bool, bool, bool, bool, bool]:
+        return "en", True, True, False, False, False, False
 
     class FakeSession:
         async def execute(self, *_args, **_kwargs) -> None:
@@ -37,8 +34,7 @@ def test_cb_unsubscribe_sends_message_via_bot_after_delete(monkeypatch) -> None:
         return FakeSessionContext()
 
     monkeypatch.setattr(user_handlers, "_is_rate_limited", fake_not_limited)
-    monkeypatch.setattr(user_handlers, "_ensure_user_exists", fake_ensure_user_exists)
-    monkeypatch.setattr(user_handlers, "_get_user_settings", fake_get_user_settings)
+    monkeypatch.setattr(user_handlers, "_get_or_create_user", fake_get_or_create_user)
     monkeypatch.setattr(user_handlers, "async_session", fake_async_session)
 
     callback = SimpleNamespace(

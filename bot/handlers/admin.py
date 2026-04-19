@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 
 from bot.core.config import settings
 from bot.core.database import async_session
-from bot.models.models import Game, User
+from bot.models.models import Game, User, UserGame
 from bot.services.broadcaster import broadcast_text
 
 router = Router(name="admin")
@@ -95,11 +95,45 @@ async def cmd_stats(message: Message) -> None:
         )
         total_games = await session.scalar(select(func.count(Game.id)))
 
+        total_user_games = 0
+        total_claimed = 0
+        top_lines: list[str] = []
+        try:
+            total_user_games = int(await session.scalar(select(func.count(UserGame.id))) or 0)
+            total_claimed = int(
+                await session.scalar(
+                    select(func.count(UserGame.id)).where(UserGame.status == "claimed")
+                )
+                or 0
+            )
+
+            top_result = await session.execute(
+                select(Game.title, func.count(UserGame.id).label("claimed_count"))
+                .join(UserGame, UserGame.game_external_id == Game.external_id)
+                .where(UserGame.status == "claimed")
+                .group_by(Game.title)
+                .order_by(func.count(UserGame.id).desc())
+                .limit(3)
+            )
+            top_rows = top_result.all()
+            for title, count in top_rows:
+                top_lines.append(f"• {title}: <b>{count}</b>")
+        except Exception as exc:
+            logger.warning("Extended admin stats unavailable: {exc}", exc=exc)
+
+    claim_rate = (total_claimed / total_user_games * 100.0) if total_user_games else 0.0
+    top_section = "\n".join(top_lines) if top_lines else "• N/A"
+
     text = (
         "📊 <b>Bot Statistics</b>\n\n"
         f"👥 Total users: <b>{total_users}</b>\n"
         f"✅ Active users: <b>{active_users}</b>\n"
-        f"🎮 Games sent: <b>{total_games}</b>"
+        f"🎮 Games sent: <b>{total_games}</b>\n"
+        f"🧾 UserGame records: <b>{total_user_games}</b>\n"
+        f"✅ Claimed total: <b>{total_claimed}</b>\n"
+        f"📈 Claim rate: <b>{claim_rate:.1f}%</b>\n\n"
+        "🏆 Top claimed games:\n"
+        f"{top_section}"
     )
     await message.answer(text, parse_mode="HTML")
     logger.info("Admin {tg_id} requested stats", tg_id=message.from_user.id)

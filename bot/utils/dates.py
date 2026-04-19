@@ -7,7 +7,14 @@ from datetime import datetime
 from bot.core.translations import t
 
 
-SUPPORTED_DATE_FORMATS = ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y")
+SUPPORTED_DATE_FORMATS = (
+    "%Y-%m-%d",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%dT%H:%M",
+    "%d.%m.%Y",
+    "%d/%m/%Y",
+)
 
 
 def format_end_date(end_date_raw: str | None, lang: str | None = None) -> str | None:
@@ -23,7 +30,9 @@ def format_end_date(end_date_raw: str | None, lang: str | None = None) -> str | 
     value = end_date_raw.strip()
     for fmt in SUPPORTED_DATE_FORMATS:
         try:
-            end_date = datetime.strptime(value, fmt).date()
+            parsed_dt = datetime.strptime(value, fmt)
+            end_date = parsed_dt.date()
+            display_date = parsed_dt.strftime("%Y-%m-%d")
             today = datetime.now().date()
             delta = (end_date - today).days
 
@@ -33,7 +42,7 @@ def format_end_date(end_date_raw: str | None, lang: str | None = None) -> str | 
                 return t("date_today", lang)
             if delta == 1:
                 return t("date_tomorrow", lang)
-            return f"{value} ({delta} {t('date_days_left', lang)})"
+            return f"{display_date} ({delta} {t('date_days_left', lang)})"
         except ValueError:
             continue
 

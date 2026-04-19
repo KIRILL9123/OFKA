@@ -3,6 +3,7 @@
 import asyncio
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
+from aiogram.exceptions import TelegramForbiddenError
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -12,12 +13,13 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 from loguru import logger
-from sqlalchemy import select, update
+from sqlalchemy import and_, func, select, text, update
 
 from bot.core.config import settings
 from bot.core.database import async_session
 from bot.core.translations import LANG_LABELS, t
-from bot.models.models import User
+from bot.models.models import User, UserGame
+from bot.services.game_display import show_active_games_to_user
 
 router = Router(name="user")
 
@@ -39,6 +41,7 @@ PLATFORM_FIELDS: dict[str, str] = {
 # Rate-limiting: track user action timestamps
 _user_rate_limit: dict[int, list[float]] = {}
 _user_rate_limit_lock = asyncio.Lock()
+_rate_limit_cleanup_running = True
 
 
 async def _is_rate_limited(tg_id: int) -> bool:
@@ -67,6 +70,48 @@ async def _is_rate_limited(tg_id: int) -> bool:
         return False
 
 
+async def _cleanup_rate_limit_cache() -> None:
+    """Background task to evict stale user rate-limit entries."""
+    import time
+
+    while _rate_limit_cleanup_running:
+        try:
+            await asyncio.sleep(300)
+            if not _rate_limit_cleanup_running:
+                break
+
+            now = time.time()
+            cutoff = now - 60
+            async with _user_rate_limit_lock:
+                stale_ids = [
+                    tg_id
+                    for tg_id, timestamps in _user_rate_limit.items()
+                    if timestamps and all(ts <= cutoff for ts in timestamps)
+                ]
+                for tg_id in stale_ids:
+                    _user_rate_limit.pop(tg_id, None)
+
+            logger.debug(
+                "Rate limit cache cleaned: removed {n} stale entries",
+                n=len(stale_ids),
+            )
+        except Exception as exc:
+            logger.error("Error in _cleanup_rate_limit_cache: {exc}", exc=exc)
+
+
+async def start_rate_limit_cleanup() -> None:
+    """Start background cleanup task for in-memory rate-limit cache."""
+    global _rate_limit_cleanup_running
+    _rate_limit_cleanup_running = True
+    asyncio.create_task(_cleanup_rate_limit_cache())
+
+
+async def stop_rate_limit_cleanup() -> None:
+    """Signal background cleanup task to stop gracefully."""
+    global _rate_limit_cleanup_running
+    _rate_limit_cleanup_running = False
+
+
 def _validate_callback_data(data: str, max_length: int | None = None) -> bool:
     """Validate callback_query data to prevent injection/DoS attacks."""
     if max_length is None:
@@ -88,17 +133,18 @@ def _on_off(value: bool) -> str:
     return "✅" if value else "❌"
 
 
-def _main_menu_keyboard() -> ReplyKeyboardMarkup:
+def _main_menu_keyboard(lang: str | None = None) -> ReplyKeyboardMarkup:
     """Build persistent reply keyboard with quick actions."""
     return ReplyKeyboardMarkup(
         keyboard=[
+            [KeyboardButton(text=t("btn_games", lang)), KeyboardButton(text=t("btn_stats", lang))],
             [KeyboardButton(text="⚙️ Settings"), KeyboardButton(text="ℹ️ Help")],
         ],
         resize_keyboard=True,
     )
 
 
-def _language_keyboard() -> InlineKeyboardMarkup:
+def _language_keyboard(lang: str | None = None) -> InlineKeyboardMarkup:
     """Build language selection keyboard (2 buttons per row)."""
     buttons = [
         InlineKeyboardButton(
@@ -108,7 +154,7 @@ def _language_keyboard() -> InlineKeyboardMarkup:
         for code, label in LANG_LABELS.items()
     ]
     rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
-    rows.append([InlineKeyboardButton(text=t("btn_back", "en"), callback_data=BACK_TO_SETTINGS_CB)])
+    rows.append([InlineKeyboardButton(text=t("btn_back", lang), callback_data=BACK_TO_SETTINGS_CB)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -164,46 +210,43 @@ def _settings_keyboard(
     )
 
 
-async def _ensure_user_exists(tg_id: int) -> tuple[bool, bool]:
-    """Create or reactivate user row, preserving existing preferences.
-    Returns (created, reactivated).
-    """
+def _parse_worth_value(value: str) -> float:
+    """Parse money-like worth strings to float values, return 0.0 for unknown formats."""
+    normalized = value.replace("$", "").replace("€", "").replace("£", "").strip()
+    normalized = normalized.replace(",", ".")
+    return float(normalized)
+
+
+async def _get_or_create_user(
+    tg_id: int,
+) -> tuple[str | None, bool, bool, bool, bool, bool, bool]:
+    """Fetch user settings in one query, creating/reactivating the user when needed."""
     async with async_session() as session:
         result = await session.execute(select(User).where(User.tg_id == tg_id))
         user = result.scalars().first()
+
         created = False
         reactivated = False
-        if not user:
+        if user is None:
             created = True
             user = User(tg_id=tg_id, is_active=True)
             session.add(user)
-        else:
-            if not user.is_active:
-                reactivated = True
-                user.is_active = True
-        await session.commit()
-        return created, reactivated
+            await session.commit()
+            await session.refresh(user)
+        elif not user.is_active:
+            reactivated = True
+            user.is_active = True
+            await session.commit()
 
-
-async def _get_user_settings(
-    tg_id: int,
-) -> tuple[str | None, bool, bool, bool, bool]:
-    """Fetch language and platform preferences for a user."""
-    async with async_session() as session:
-        result = await session.execute(
-            select(
-                User.language,
-                User.pref_steam,
-                User.pref_epic,
-                User.pref_gog,
-                User.pref_other,
-            ).where(User.tg_id == tg_id)
+        return (
+            user.language,
+            user.pref_steam,
+            user.pref_epic,
+            user.pref_gog,
+            user.pref_other,
+            created,
+            reactivated,
         )
-        row = result.first()
-
-    if row is None:
-        return None, True, True, False, False
-    return row
 
 
 @router.message(CommandStart())
@@ -213,28 +256,27 @@ async def cmd_start(message: Message) -> None:
 
     # Rate-limit check
     if await _is_rate_limited(tg_id):
-        lang, _, _, _, _ = await _get_user_settings(tg_id)
+        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
         await message.answer(
             t("rate_limit_message", lang),
             parse_mode="HTML",
         )
         return
 
-    created, reactivated = await _ensure_user_exists(tg_id)
-    lang, _, _, _, _ = await _get_user_settings(tg_id)
+    lang, _, _, _, _, created, reactivated = await _get_or_create_user(tg_id)
 
     if reactivated:
         logger.info("User {tg_id} resubscribed", tg_id=tg_id)
         await message.answer(
             t("resubscribed", lang),
             parse_mode="HTML",
-            reply_markup=_main_menu_keyboard(),
+            reply_markup=_main_menu_keyboard(lang),
         )
     else:
         await message.answer(
             t("start", lang),
             parse_mode="HTML",
-            reply_markup=_main_menu_keyboard(),
+            reply_markup=_main_menu_keyboard(lang),
         )
         if created:
             await message.answer(
@@ -248,8 +290,7 @@ async def cmd_start(message: Message) -> None:
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
     """Show help information in the user's language."""
-    await _ensure_user_exists(message.from_user.id)
-    lang, _, _, _, _ = await _get_user_settings(message.from_user.id)
+    lang, _, _, _, _, _, _ = await _get_or_create_user(message.from_user.id)
     await message.answer(
         t("help", lang),
         parse_mode="HTML",
@@ -263,15 +304,14 @@ async def cmd_settings(message: Message) -> None:
 
     # Rate-limit check
     if await _is_rate_limited(tg_id):
-        lang, _, _, _, _ = await _get_user_settings(tg_id)
+        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
         await message.answer(
             t("rate_limit_message", lang),
             parse_mode="HTML",
         )
         return
 
-    await _ensure_user_exists(tg_id)
-    lang, pref_steam, pref_epic, pref_gog, pref_other = await _get_user_settings(tg_id)
+    lang, pref_steam, pref_epic, pref_gog, pref_other, _, _ = await _get_or_create_user(tg_id)
 
     await message.answer(
         t("settings_title", lang),
@@ -292,21 +332,111 @@ async def open_help_button(message: Message) -> None:
     await cmd_help(message)
 
 
+@router.message(F.text.startswith("🎮"))
+async def open_games_button(message: Message) -> None:
+    """Open active games list when user taps the Games button."""
+    tg_id = message.from_user.id
+    if await _is_rate_limited(tg_id):
+        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+        try:
+            await message.answer(t("rate_limit_message", lang), parse_mode="HTML")
+        except TelegramForbiddenError:
+            logger.info("User {tg_id} blocked the bot in games button", tg_id=tg_id)
+        return
+
+    lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+    await show_active_games_to_user(message.bot, tg_id, lang, message)
+
+
+@router.message(F.text.startswith("📊"))
+async def cmd_stats_user(message: Message) -> None:
+    """Show per-user claim/skip/savings stats."""
+    tg_id = message.from_user.id
+    if await _is_rate_limited(tg_id):
+        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+        try:
+            await message.answer(t("rate_limit_message", lang), parse_mode="HTML")
+        except TelegramForbiddenError:
+            logger.info("User {tg_id} blocked the bot in stats button", tg_id=tg_id)
+        return
+
+    lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+
+    claimed_count = 0
+    skipped_count = 0
+    total_saved = 0.0
+    async with async_session() as session:
+        try:
+            claimed_count = int(
+                await session.scalar(
+                    select(func.count(UserGame.id)).where(
+                        and_(UserGame.tg_id == tg_id, UserGame.status == "claimed")
+                    )
+                )
+                or 0
+            )
+            skipped_count = int(
+                await session.scalar(
+                    select(func.count(UserGame.id)).where(
+                        and_(UserGame.tg_id == tg_id, UserGame.status == "skipped")
+                    )
+                )
+                or 0
+            )
+
+            worth_result = await session.execute(
+                text(
+                    """
+                    SELECT g.worth
+                    FROM games AS g
+                    JOIN user_games AS ug ON ug.game_external_id = g.external_id
+                    WHERE ug.tg_id = :tg_id
+                      AND ug.status = 'claimed'
+                      AND g.worth IS NOT NULL
+                      AND g.worth != 'N/A'
+                    """
+                ),
+                {"tg_id": tg_id},
+            )
+            worth_values = worth_result.scalars().all()
+            for raw_value in worth_values:
+                try:
+                    if isinstance(raw_value, str):
+                        total_saved += _parse_worth_value(raw_value)
+                except (ValueError, TypeError, AttributeError):
+                    continue
+        except Exception as exc:
+            logger.warning("User stats query failed for {tg_id}: {exc}", tg_id=tg_id, exc=exc)
+
+    try:
+        await message.answer(
+            t(
+                "user_stats",
+                lang,
+                claimed=claimed_count,
+                skipped=skipped_count,
+                saved=f"${total_saved:.2f}",
+            ),
+            parse_mode="HTML",
+        )
+    except TelegramForbiddenError:
+        logger.info("Cannot send stats to blocked user {tg_id}", tg_id=tg_id)
+
+
 @router.callback_query(F.data == OPEN_LANG_PICKER_CB)
 async def cb_open_language_picker(callback: CallbackQuery) -> None:
     """Open language picker from settings."""
     # Rate-limit check
     if await _is_rate_limited(callback.from_user.id):
-        lang, _, _, _, _ = await _get_user_settings(callback.from_user.id)
+        lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
-    
-    await _ensure_user_exists(callback.from_user.id)
-    lang, _, _, _, _ = await _get_user_settings(callback.from_user.id)
+
+    lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
     await callback.message.edit_text(
         t("settings_language_title", lang),
         parse_mode="HTML",
-        reply_markup=_language_keyboard(),
+        reply_markup=_language_keyboard(lang),
     )
     await callback.answer()
 
@@ -316,12 +446,11 @@ async def cb_back_to_settings(callback: CallbackQuery) -> None:
     """Return from language picker to settings menu."""
     # Rate-limit check
     if await _is_rate_limited(callback.from_user.id):
-        lang, _, _, _, _ = await _get_user_settings(callback.from_user.id)
+        lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
-    
-    await _ensure_user_exists(callback.from_user.id)
-    lang, pref_steam, pref_epic, pref_gog, pref_other = await _get_user_settings(
+
+    lang, pref_steam, pref_epic, pref_gog, pref_other, _, _ = await _get_or_create_user(
         callback.from_user.id
     )
     await callback.message.edit_text(
@@ -360,12 +489,11 @@ async def cb_toggle_platform(callback: CallbackQuery) -> None:
 
     # Rate-limit check
     if await _is_rate_limited(tg_id):
-        lang, _, _, _, _ = await _get_user_settings(tg_id)
+        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
 
-    await _ensure_user_exists(tg_id)
-    lang, pref_steam, pref_epic, pref_gog, pref_other = await _get_user_settings(tg_id)
+    lang, pref_steam, pref_epic, pref_gog, pref_other, _, _ = await _get_or_create_user(tg_id)
     current = {
         "pref_steam": pref_steam,
         "pref_epic": pref_epic,
@@ -446,7 +574,7 @@ async def cb_set_language(callback: CallbackQuery) -> None:
         await callback.answer("⏳ Too many requests. Please wait.", show_alert=False)
         return
 
-    await _ensure_user_exists(tg_id)
+    _, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
 
     async with async_session() as session:
         await session.execute(
@@ -458,7 +586,7 @@ async def cb_set_language(callback: CallbackQuery) -> None:
 
     logger.info("User {tg_id} set language to {lang}", tg_id=tg_id, lang=lang)
 
-    _, pref_steam, pref_epic, pref_gog, pref_other = await _get_user_settings(tg_id)
+    _, pref_steam, pref_epic, pref_gog, pref_other, _, _ = await _get_or_create_user(tg_id)
     await callback.message.edit_text(
         f"{t('language_set', lang)}\n\n{t('settings_title', lang)}",
         parse_mode="HTML",
@@ -481,12 +609,11 @@ async def cb_done_settings(callback: CallbackQuery) -> None:
     
     # Rate-limit check
     if await _is_rate_limited(callback.from_user.id):
-        lang, _, _, _, _ = await _get_user_settings(callback.from_user.id)
+        lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
-    
-    await _ensure_user_exists(callback.from_user.id)
-    lang, _, _, _, _ = await _get_user_settings(callback.from_user.id)
+
+    lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
     await callback.message.delete()
     await callback.answer(t("settings_saved", lang))
 
@@ -498,12 +625,11 @@ async def cb_unsubscribe(callback: CallbackQuery) -> None:
 
     # Rate-limit check
     if await _is_rate_limited(tg_id):
-        lang, _, _, _, _ = await _get_user_settings(tg_id)
+        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
 
-    await _ensure_user_exists(tg_id)
-    lang, _, _, _, _ = await _get_user_settings(tg_id)
+    lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
 
     async with async_session() as session:
         await session.execute(

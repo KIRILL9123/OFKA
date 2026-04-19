@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, func, text
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, UniqueConstraint, func, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -55,9 +55,37 @@ class Game(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     external_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(512), nullable=False)
+    worth: Mapped[str | None] = mapped_column(String(32), nullable=True)
     sent_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
 
     def __repr__(self) -> str:
         return f"<Game id={self.external_id} title={self.title!r}>"
+
+
+class UserGame(Base):
+    """Per-user action state for a giveaway (claimed/skipped/remind)."""
+
+    __tablename__ = "user_games"
+    __table_args__ = (
+        UniqueConstraint("tg_id", "game_external_id", name="uq_user_games_tg_game"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tg_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    game_external_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="claimed")
+    remind_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<UserGame tg_id={self.tg_id} game_external_id={self.game_external_id} "
+            f"status={self.status}>"
+        )

@@ -14,7 +14,7 @@ from sqlalchemy import select, update
 
 from bot.core.database import async_session
 from bot.core.translations import t
-from bot.models.models import User
+from bot.models.models import Game, User
 from bot.utils.dates import format_end_date
 
 # Delay between messages to stay under Telegram rate limits (~20 msg/sec)
@@ -154,14 +154,54 @@ def build_game_caption(game: dict[str, Any], lang: str | None) -> str:
     )
 
 
-def build_game_keyboard(game: dict[str, Any], lang: str | None) -> InlineKeyboardMarkup:
-    """Build an inline keyboard with a 'Claim Game' button."""
-    url = game.get("open_giveaway_url", "https://www.gamerpower.com")
+def _build_action_keyboard(
+    game_external_id: int | None,
+    url: str,
+    lang: str | None,
+) -> InlineKeyboardMarkup:
+    """Build game action keyboard with claim URL and quick status actions."""
+    if game_external_id is None:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=t("btn_claim_game", lang), url=url)]
+            ]
+        )
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=t("claim_button", lang), url=url)]
+            [InlineKeyboardButton(text=t("btn_claim_game", lang), url=url)],
+            [
+                InlineKeyboardButton(
+                    text=t("btn_claimed", lang),
+                    callback_data=f"game:claim:{game_external_id}",
+                ),
+                InlineKeyboardButton(
+                    text=t("btn_skip", lang),
+                    callback_data=f"game:skip:{game_external_id}",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=t("btn_remind", lang),
+                    callback_data=f"game:remind:{game_external_id}",
+                )
+            ],
         ]
     )
+
+
+def build_game_keyboard(game: dict[str, Any], lang: str | None) -> InlineKeyboardMarkup:
+    """Build giveaway keyboard with claim URL and state action buttons."""
+    url = str(game.get("open_giveaway_url", "https://www.gamerpower.com"))
+    external_id = game.get("id")
+    game_external_id = external_id if isinstance(external_id, int) else None
+    return _build_action_keyboard(game_external_id, url, lang)
+
+
+def build_game_keyboard_from_db(game: Game, lang: str | None) -> InlineKeyboardMarkup:
+    """Build keyboard for reminders using a Game ORM model instance."""
+    fallback_url = f"https://www.gamerpower.com/giveaways/{game.external_id}"
+    return _build_action_keyboard(game.external_id, fallback_url, lang)
 
 
 async def send_game_to_user(
