@@ -1,0 +1,33 @@
+# Development overrides — used automatically on MacBook (or any dev machine).
+# This file is git-ignored, so production is NOT affected.
+#
+# Usage:
+#   docker compose up --build          # normal dev start
+#   docker compose up --build -d       # detached
+#   docker compose down                # stop
+#
+# The source code is mounted read-only so you can edit locally
+# and restart the container to pick up changes:
+#   docker compose restart bot
+
+services:
+  bot:
+    # Do NOT restart automatically on dev machine
+    restart: "no"
+    # Mount live source code for quick iteration
+    volumes:
+      - .:/app:ro          # source code (read-only mount)
+      - bot-data:/app/data # keep DB persistent
+    # Relax resource limits so dev tools don't starve
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "1.0"
+    # Pass extra env for dev (override values from .env if needed)
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+
+volumes:
+  bot-data:

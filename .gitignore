@@ -1,11 +1,29 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+
+# Environments
 .env
+.env.*
+!.env.example
+
+# Docker dev override — only for local machines, never commit
+docker-compose.override.yml
+
+# Data / logs / DB
 data/
 *.db
-.venv/
-venv/
-.idea/
-.vscode/
-aufgaben.MD
+*.db-shm
+*.db-wal
+
+# macOS
+.DS_Store
+
+# pytest
+.pytest_cache/
+htmlcov/
+.coverage
+
+# mypy
+.mypy_cache/

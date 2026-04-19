@@ -2,16 +2,31 @@ services:
   bot:
     build: .
     container_name: ofka-bot
-    restart: unless-stopped
+    # always restart — survives PC reboots and Docker daemon restarts
+    restart: always
     env_file:
       - .env
     volumes:
       - bot-data:/app/data
+    # Keep memory footprint small; adjust if needed
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.25"
+        reservations:
+          memory: 32m
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import bot.core.config"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
 volumes:
   bot-data:
