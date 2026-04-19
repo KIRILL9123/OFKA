@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time as _time_module
 from typing import Any
 
 from aiogram import Bot
@@ -14,7 +15,7 @@ from sqlalchemy import and_, select
 from bot.core.database import async_session
 from bot.core.translations import t
 from bot.models.models import UserGame
-from bot.services.api_client import fetch_free_games
+from bot.services.api_client import fetch_free_games, get_cached_games
 from bot.services.broadcaster import build_game_caption, build_game_keyboard
 
 
@@ -31,7 +32,13 @@ async def show_active_games_to_user(
         logger.info("Cannot send loading state to blocked user {tg_id}", tg_id=tg_id)
         return
 
-    games = await fetch_free_games()
+    cached_games, cache_ts = get_cached_games()
+    cache_age = _time_module.monotonic() - cache_ts if cache_ts > 0 else float("inf")
+
+    if cached_games and cache_age < 1800:  # 30 minutes
+        games = cached_games
+    else:
+        games = await fetch_free_games()
     if not games:
         try:
             await reply_target.answer(t("no_active_games", lang), parse_mode=ParseMode.HTML)

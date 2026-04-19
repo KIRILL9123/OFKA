@@ -4,22 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramForbiddenError
+from aiogram.types import URLInputFile
 from aiogram.types import BotCommand, BotCommandScopeDefault
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import and_, select, update
 
 from bot.core.config import settings
 from bot.core.database import async_session, engine, get_effective_database_url
+from bot.core.translations import t
 from bot.handlers import admin, games, user
-from bot.models.models import Game
+from bot.models.models import Game, User, UserGame
 from bot.services.api_client import fetch_free_games
-from bot.services.broadcaster import broadcast_game
+from bot.services.broadcaster import broadcast_game, build_game_keyboard_from_db
 from bot.utils.dates import format_end_date
 
 # ---------------------------------------------------------------------------
@@ -106,6 +110,83 @@ async def check_new_games(bot: Bot) -> None:
         await broadcast_game(bot, game)
 
     logger.info("Check complete — {n} new game(s) broadcasted", n=new_count)
+
+
+async def send_reminders(bot: Bot) -> None:
+    """Send reminders for unclaimed/remind_pending games older than 24 hours."""
+    logger.info("Running daily reminder job")
+    cutoff = datetime.utcnow() - timedelta(hours=24)
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(UserGame, Game, User)
+            .join(Game, Game.external_id == UserGame.game_external_id)
+            .join(User, User.tg_id == UserGame.tg_id)
+            .where(
+                and_(
+                    User.is_active.is_(True),
+                    UserGame.status.in_(["notified", "remind_pending"]),
+                    UserGame.updated_at < cutoff,
+                )
+            )
+        )
+        rows = result.all()
+
+    reminded_ids: list[int] = []
+    for user_game, game, user in rows:
+        # Skip if game is expired
+        end_date = getattr(game, "end_date", None)
+        if end_date:
+            if format_end_date(end_date) is None:
+                reminded_ids.append(user_game.id)
+                continue
+
+        lang = user.language
+        text_msg = t(
+            "reminder_message",
+            lang,
+            title=game.title,
+        )
+        keyboard = build_game_keyboard_from_db(game, lang)
+
+        try:
+            thumbnail = getattr(game, "thumbnail", None)
+            if thumbnail:
+                await bot.send_photo(
+                    chat_id=user_game.tg_id,
+                    photo=URLInputFile(thumbnail),
+                    caption=text_msg,
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+            else:
+                await bot.send_message(
+                    chat_id=user_game.tg_id,
+                    text=text_msg,
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+            reminded_ids.append(user_game.id)
+            await asyncio.sleep(0.05)
+        except TelegramForbiddenError:
+            reminded_ids.append(user_game.id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to send reminder to {tg_id}: {exc}",
+                tg_id=user_game.tg_id,
+                exc=exc,
+            )
+
+    if reminded_ids:
+        async with async_session() as session:
+            await session.execute(
+                update(UserGame)
+                .where(UserGame.id.in_(reminded_ids))
+                .values(status="reminded")
+            )
+            await session.commit()
+
+    logger.info("Reminder job complete — sent {n} reminders", n=len(reminded_ids))
 
 
 def _to_sync_db_url(database_url: str) -> str:
@@ -195,6 +276,17 @@ async def main() -> None:
         id="check_new_games",
         replace_existing=True,
     )
+    scheduler.add_job(
+        send_reminders,
+        trigger="cron",
+        hour=12,
+        minute=0,
+        timezone="UTC",
+        args=[bot],
+        id="send_reminders",
+        replace_existing=True,
+    )
+    logger.info("Reminder scheduler registered — fires daily at 12:00 UTC")
     scheduler.start()
     logger.info(
         "Scheduler started — checking every {m} min",

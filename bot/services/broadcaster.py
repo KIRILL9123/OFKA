@@ -11,10 +11,11 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, URLInputFile
 from loguru import logger
 from sqlalchemy import select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from bot.core.database import async_session
 from bot.core.translations import t
-from bot.models.models import Game, User
+from bot.models.models import Game, User, UserGame
 from bot.utils.dates import format_end_date
 
 # Delay between messages to stay under Telegram rate limits (~20 msg/sec)
@@ -296,6 +297,7 @@ async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
     success = 0
     failed = 0
     deactivated_ids: list[int] = []
+    delivered_tg_ids: list[int] = []
 
     # Stream users in batches of 500 to avoid memory spikes
     async with async_session() as session:
@@ -325,6 +327,7 @@ async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
             delivered = await send_game_to_user(bot, tg_id, game, lang)
             if delivered:
                 success += 1
+                delivered_tg_ids.append(tg_id)
             else:
                 failed += 1
                 deactivated_ids.append(tg_id)
@@ -339,6 +342,28 @@ async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
             )
             await session.commit()
             logger.info("Deactivated {count} blocked users", count=len(deactivated_ids))
+
+    game_external_id = game.get("id")
+    if delivered_tg_ids and isinstance(game_external_id, int):
+        async with async_session() as session:
+            await session.execute(
+                sqlite_insert(UserGame).values(
+                    [
+                        {
+                            "tg_id": tid,
+                            "game_external_id": game_external_id,
+                            "status": "notified",
+                        }
+                        for tid in delivered_tg_ids
+                    ]
+                ).on_conflict_do_nothing(index_elements=["tg_id", "game_external_id"])
+            )
+            await session.commit()
+        logger.info(
+            "Recorded {n} UserGame notified entries for game {gid}",
+            n=len(delivered_tg_ids),
+            gid=game_external_id,
+        )
 
     logger.info(
         "Broadcast complete: {ok} delivered, {fail} failed",

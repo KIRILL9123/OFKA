@@ -75,8 +75,8 @@ class UserGame(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tg_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     game_external_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="claimed")
-    remind_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="notified")
+    remind_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),

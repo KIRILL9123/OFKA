@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import time as _time_module
 from typing import Any
 
 import aiohttp
@@ -15,6 +16,9 @@ API_TIMEOUT = aiohttp.ClientTimeout(total=20)
 MAX_RETRIES = 3
 BACKOFF_BASE_SECONDS = 1.0
 BACKOFF_MAX_SECONDS = 8.0
+
+_games_cache: list[dict] = []
+_cache_updated_at: float = 0.0
 
 
 class _CircuitBreaker:
@@ -113,6 +117,12 @@ async def fetch_free_games() -> list[dict[str, Any]]:
                         "Fetched {count} active game giveaways",
                         count=len(games),
                     )
+
+                    # Update cache on successful non-empty fetch
+                    if games:
+                        global _games_cache, _cache_updated_at
+                        _games_cache = games
+                        _cache_updated_at = _time_module.monotonic()
                     return games
 
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
@@ -150,3 +160,11 @@ async def fetch_free_games() -> list[dict[str, Any]]:
         exc=last_exc,
     )
     return []
+
+
+def get_cached_games() -> tuple[list[dict], float]:
+    """Return cached games list and monotonic timestamp of last update.
+
+    Returns ([], 0.0) if cache has never been populated.
+    """
+    return _games_cache, _cache_updated_at

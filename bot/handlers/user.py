@@ -1,7 +1,7 @@
 """Handlers for user commands: /start, /help, /settings, preferences."""
 
 import asyncio
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.types import (
@@ -249,6 +249,19 @@ async def _get_or_create_user(
         )
 
 
+async def _show_games_on_start(bot: Bot, tg_id: int, lang: str | None, message: Message) -> None:
+    """Background task: show active giveaways after welcome message."""
+    try:
+        await asyncio.sleep(0.8)  # Let welcome message render first
+        await show_active_games_to_user(bot, tg_id, lang, message)
+    except Exception as exc:
+        logger.warning(
+            "Failed to show games on start for {tg_id}: {exc}",
+            tg_id=tg_id,
+            exc=exc,
+        )
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     """Register/reactivate user and show welcome + subscription confirmation."""
@@ -283,6 +296,9 @@ async def cmd_start(message: Message) -> None:
                 t("subscription_confirmed", lang),
                 parse_mode="HTML",
             )
+
+    # Show active giveaways to new and returning users
+    asyncio.create_task(_show_games_on_start(message.bot, tg_id, lang, message))
 
     logger.info("User {tg_id} started the bot (created={created}, reactivated={reactivated})", tg_id=tg_id, created=created, reactivated=reactivated)
 
@@ -573,8 +589,6 @@ async def cb_set_language(callback: CallbackQuery) -> None:
     if await _is_rate_limited(tg_id):
         await callback.answer("⏳ Too many requests. Please wait.", show_alert=False)
         return
-
-    _, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
 
     async with async_session() as session:
         await session.execute(
