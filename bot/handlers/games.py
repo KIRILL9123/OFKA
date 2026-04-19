@@ -55,7 +55,12 @@ async def _upsert_user_game_state(
             row.status = status
             row.remind_at = remind_at
 
-        await session.commit()
+        try:
+            await session.commit()
+        except Exception as commit_exc:
+            await session.rollback()
+            logger.error("DB commit failed in _upsert_user_game_state: {exc}", exc=commit_exc)
+            raise
 
 
 @router.message(Command("games"))

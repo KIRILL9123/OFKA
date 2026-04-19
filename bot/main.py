@@ -82,7 +82,7 @@ async def check_new_games(bot: Bot) -> None:
                 [
                     Game(
                         external_id=external_id,
-                        title=games_by_external_id[external_id].get("title", "Unknown"),
+                        title=games_by_external_id[external_id].get("title") or "Unknown",
                         worth=games_by_external_id[external_id].get("worth"),
                     )
                     for external_id in new_ids

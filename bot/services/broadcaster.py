@@ -126,6 +126,8 @@ def build_game_caption(game: dict[str, Any], lang: str | None) -> str:
     formats dates and platforms with emojis.
     """
     unknown = t("unknown_value", lang)
+    # 800 chars for description leaves ~224 chars headroom for title,
+    # worth, platforms, end_date and HTML tags within Telegram's 1024-char caption limit.
     MAX_DESCRIPTION_LENGTH = 800
     MAX_TITLE_LENGTH = 200
     
