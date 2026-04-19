@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import Bot
@@ -11,7 +12,7 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, URLInputFile
 from loguru import logger
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from bot.core.database import async_session
@@ -418,7 +419,11 @@ async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
     return success, failed
 
 
-async def broadcast_text(bot: Bot, text: str) -> tuple[int, int]:
+async def broadcast_text(
+    bot: Bot,
+    text: str,
+    progress_cb: Callable[[int, int], Awaitable[None]] | None = None,
+) -> tuple[int, int]:
     """Send a plain text message to every active user.
     
     Uses streaming with yield_per to efficiently handle large user bases.
@@ -430,6 +435,10 @@ async def broadcast_text(bot: Bot, text: str) -> tuple[int, int]:
 
     # Stream users in batches to avoid loading all into memory
     async with async_session() as session:
+        total = int(
+            await session.scalar(select(func.count(User.id)).where(User.is_active.is_(True)))
+            or 0
+        )
         result = await session.execute(
             select(User.tg_id).where(User.is_active.is_(True))
         )
@@ -459,6 +468,9 @@ async def broadcast_text(bot: Bot, text: str) -> tuple[int, int]:
             except Exception as exc:
                 logger.error("broadcast_text error for {tg_id}: {exc}", tg_id=tg_id, exc=exc)
                 failed += 1
+
+            if progress_cb and (success + failed) % 50 == 0:
+                await progress_cb(success + failed, total)
 
             await asyncio.sleep(SEND_DELAY)
         

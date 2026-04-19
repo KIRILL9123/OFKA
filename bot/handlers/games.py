@@ -32,7 +32,7 @@ async def _upsert_user_game_state(
     game_external_id: int,
     status: str,
     remind_at: datetime | None = None,
-) -> None:
+) -> bool:
     """Store or update game action state for a user."""
     async with async_session() as session:
         existing_result = await session.execute(
@@ -52,6 +52,8 @@ async def _upsert_user_game_state(
                 )
             )
         else:
+            if row.status == status:
+                return False
             row.status = status
             row.remind_at = remind_at
 
@@ -61,6 +63,7 @@ async def _upsert_user_game_state(
             await session.rollback()
             logger.error("DB commit failed in _upsert_user_game_state: {exc}", exc=commit_exc)
             raise
+        return True
 
 
 @router.message(Command("games"))
@@ -95,8 +98,11 @@ async def cb_game_claim(callback: CallbackQuery) -> None:
 
     lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
     try:
-        await _upsert_user_game_state(tg_id, game_id, "claimed")
-        await callback.answer(t("toast_claimed", lang), show_alert=False)
+        changed = await _upsert_user_game_state(tg_id, game_id, "claimed")
+        await callback.answer(
+            t("toast_claimed", lang) if changed else t("toast_already_marked", lang),
+            show_alert=False,
+        )
     except Exception as exc:
         logger.error("Failed to mark game {game_id} as claimed for {tg_id}: {exc}", game_id=game_id, tg_id=tg_id, exc=exc)
         await callback.answer()
@@ -124,8 +130,11 @@ async def cb_game_skip(callback: CallbackQuery) -> None:
 
     lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
     try:
-        await _upsert_user_game_state(tg_id, game_id, "skipped")
-        await callback.answer(t("toast_skipped", lang), show_alert=False)
+        changed = await _upsert_user_game_state(tg_id, game_id, "skipped")
+        await callback.answer(
+            t("toast_skipped", lang) if changed else t("toast_already_marked", lang),
+            show_alert=False,
+        )
     except Exception as exc:
         logger.error("Failed to mark game {game_id} as skipped for {tg_id}: {exc}", game_id=game_id, tg_id=tg_id, exc=exc)
         await callback.answer()
@@ -153,13 +162,16 @@ async def cb_game_remind(callback: CallbackQuery) -> None:
 
     lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
     try:
-        await _upsert_user_game_state(
+        changed = await _upsert_user_game_state(
             tg_id,
             game_id,
             "remind",
             remind_at=datetime.utcnow() + timedelta(days=1),
         )
-        await callback.answer(t("toast_remind_set", lang), show_alert=False)
+        await callback.answer(
+            t("toast_remind_set", lang) if changed else t("toast_already_marked", lang),
+            show_alert=False,
+        )
     except Exception as exc:
         logger.error("Failed to set reminder for game {game_id} and user {tg_id}: {exc}", game_id=game_id, tg_id=tg_id, exc=exc)
         await callback.answer()

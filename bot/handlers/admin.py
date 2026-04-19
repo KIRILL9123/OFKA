@@ -83,6 +83,7 @@ def _is_admin(message: Message) -> bool:
 
 
 @router.message(Command("stats"))
+@router.message(Command("astats"))
 async def cmd_stats(message: Message) -> None:
     """Show bot statistics (admin only)."""
     if not _is_admin(message):
@@ -230,8 +231,15 @@ async def cb_broadcast_confirm(callback: CallbackQuery, bot: Bot) -> None:
         await callback.answer(t("admin_broadcast_expired", None), show_alert=True)
         return
     
-    await callback.message.edit_text(t("admin_broadcasting", None))
-    success, failed = await broadcast_text(bot, payload)
+    status_msg = await callback.message.edit_text(t("admin_broadcasting", None))
+
+    async def _progress(done: int, total: int) -> None:
+        try:
+            await status_msg.edit_text(f"📤 Отправляю... {done}/{total}")
+        except Exception:
+            pass
+
+    success, failed = await broadcast_text(bot, payload, progress_cb=_progress)
     
     await callback.message.edit_text(
         t("admin_broadcast_done", None, success=success, failed=failed),

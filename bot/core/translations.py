@@ -228,6 +228,12 @@ _TEXTS: dict[str, dict[str, str]] = {
         "en": "Today",
         "de": "Heute",
     },
+    "date_last_day": {
+        "ru": "🔥 Сегодня последний день!",
+        "uk": "🔥 Сьогодні останній день!",
+        "en": "🔥 Today is the last day!",
+        "de": "🔥 Heute ist der letzte Tag!",
+    },
     "date_tomorrow": {
         "ru": "Завтра",
         "uk": "Завтра",
@@ -293,6 +299,12 @@ _TEXTS: dict[str, dict[str, str]] = {
         "uk": "⏰ Нагадаємо завтра!",
         "en": "⏰ We'll remind you tomorrow!",
         "de": "⏰ Wir erinnern dich morgen!",
+    },
+    "toast_already_marked": {
+        "ru": "Уже отмечено ✅",
+        "uk": "Вже позначено ✅",
+        "en": "Already marked ✅",
+        "de": "Bereits markiert ✅",
     },
     "no_active_games": {
         "ru": "😴 Сейчас активных раздач нет. Мы уведомим тебя, когда появятся!",

@@ -91,6 +91,15 @@ async def check_new_games(bot: Bot) -> None:
             await session.commit()
 
     new_count = 0
+    seen_ids: set[int] = set()
+    deduplicated = []
+    for game in new_games:
+        external_id = game.get("id")
+        if isinstance(external_id, int) and external_id not in seen_ids:
+            seen_ids.add(external_id)
+            deduplicated.append(game)
+    new_games = deduplicated
+
     for game in new_games:
         # Validate game has required fields and is not expired
         if not game.get("title") or not game.get("id"):

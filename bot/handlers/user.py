@@ -279,7 +279,7 @@ async def cmd_start(message: Message) -> None:
     lang, _, _, _, _, created, reactivated = await _get_or_create_user(tg_id)
 
     if reactivated:
-        logger.info("User {tg_id} resubscribed", tg_id=tg_id)
+        logger.info("User {tg_id} resubscribed lang={lang}", tg_id=tg_id, lang=lang)
         await message.answer(
             t("resubscribed", lang),
             parse_mode="HTML",
@@ -300,7 +300,13 @@ async def cmd_start(message: Message) -> None:
     # Show active giveaways to new and returning users
     asyncio.create_task(_show_games_on_start(message.bot, tg_id, lang, message))
 
-    logger.info("User {tg_id} started the bot (created={created}, reactivated={reactivated})", tg_id=tg_id, created=created, reactivated=reactivated)
+    logger.info(
+        "User {tg_id} started the bot (created={created}, reactivated={reactivated}, lang={lang})",
+        tg_id=tg_id,
+        created=created,
+        reactivated=reactivated,
+        lang=lang,
+    )
 
 
 @router.message(Command("help"))
