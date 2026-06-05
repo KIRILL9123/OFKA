@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -14,6 +14,7 @@ from bot.core.database import async_session
 from bot.core.translations import t
 from bot.models.models import UserGame
 from bot.services.game_display import show_active_games_to_user
+from bot.services.user_service import get_or_create_user, is_rate_limited
 
 router = Router(name="games")
 
@@ -69,18 +70,14 @@ async def _upsert_user_game_state(
 @router.message(Command("games"))
 async def cmd_games(message: Message) -> None:
     """Show current active giveaways for a user."""
-    from bot.handlers.user import _get_or_create_user
-
     tg_id = message.from_user.id
-    lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+    lang, _, _, _, _, _, _ = await get_or_create_user(tg_id)
     await show_active_games_to_user(message.bot, tg_id, lang, message)
 
 
 @router.callback_query(F.data.startswith("game:claim:"))
 async def cb_game_claim(callback: CallbackQuery) -> None:
     """Mark game as claimed for a user."""
-    from bot.handlers.user import _get_or_create_user, _is_rate_limited
-
     if callback.data is None:
         await callback.answer()
         return
@@ -91,12 +88,12 @@ async def cb_game_claim(callback: CallbackQuery) -> None:
         return
 
     tg_id = callback.from_user.id
-    if await _is_rate_limited(tg_id):
-        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+    if await is_rate_limited(tg_id):
+        lang, _, _, _, _, _, _ = await get_or_create_user(tg_id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
 
-    lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+    lang, _, _, _, _, _, _ = await get_or_create_user(tg_id)
     try:
         changed = await _upsert_user_game_state(tg_id, game_id, "claimed")
         await callback.answer(
@@ -111,8 +108,6 @@ async def cb_game_claim(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("game:skip:"))
 async def cb_game_skip(callback: CallbackQuery) -> None:
     """Mark game as skipped for a user."""
-    from bot.handlers.user import _get_or_create_user, _is_rate_limited
-
     if callback.data is None:
         await callback.answer()
         return
@@ -123,12 +118,12 @@ async def cb_game_skip(callback: CallbackQuery) -> None:
         return
 
     tg_id = callback.from_user.id
-    if await _is_rate_limited(tg_id):
-        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+    if await is_rate_limited(tg_id):
+        lang, _, _, _, _, _, _ = await get_or_create_user(tg_id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
 
-    lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+    lang, _, _, _, _, _, _ = await get_or_create_user(tg_id)
     try:
         changed = await _upsert_user_game_state(tg_id, game_id, "skipped")
         await callback.answer(
@@ -143,8 +138,6 @@ async def cb_game_skip(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("game:remind:"))
 async def cb_game_remind(callback: CallbackQuery) -> None:
     """Set reminder state for a user and game."""
-    from bot.handlers.user import _get_or_create_user, _is_rate_limited
-
     if callback.data is None:
         await callback.answer()
         return
@@ -155,18 +148,18 @@ async def cb_game_remind(callback: CallbackQuery) -> None:
         return
 
     tg_id = callback.from_user.id
-    if await _is_rate_limited(tg_id):
-        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+    if await is_rate_limited(tg_id):
+        lang, _, _, _, _, _, _ = await get_or_create_user(tg_id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
 
-    lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+    lang, _, _, _, _, _, _ = await get_or_create_user(tg_id)
     try:
         changed = await _upsert_user_game_state(
             tg_id,
             game_id,
             "remind",
-            remind_at=datetime.utcnow() + timedelta(days=1),
+            remind_at=datetime.now(timezone.utc) + timedelta(days=1),
         )
         await callback.answer(
             t("toast_remind_set", lang) if changed else t("toast_already_marked", lang),

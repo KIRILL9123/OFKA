@@ -22,8 +22,23 @@ router = Router(name="admin")
 _pending_broadcast: dict[int, tuple[str, float]] = {}
 BROADCAST_TTL_SECONDS = 300
 
+# Last expensive admin action timestamp (broadcast/force_check/backfill)
+_admin_last_expensive: dict[int, float] = {}
+
 # Flag to control cleanup task lifecycle
 _cleanup_running = True
+
+
+def _is_admin_throttled(tg_id: int) -> bool:
+    """Return True if admin ran an expensive action within the cooldown window."""
+    last = _admin_last_expensive.get(tg_id)
+    if last is None:
+        return False
+    return (time.time() - last) < settings.ADMIN_COOLDOWN_SECONDS
+
+
+def _mark_admin_action(tg_id: int) -> None:
+    _admin_last_expensive[tg_id] = time.time()
 
 
 async def _cleanup_expired_broadcasts() -> None:
@@ -150,6 +165,11 @@ async def cmd_force_check(message: Message, bot: Bot) -> None:
     if not _is_admin(message):
         return
 
+    if _is_admin_throttled(message.from_user.id):
+        await message.answer(f"⏳ Подождите {settings.ADMIN_COOLDOWN_SECONDS}s между действиями.")
+        return
+
+    _mark_admin_action(message.from_user.id)
     await message.answer("🔄 Running giveaway check…")
     logger.info("Admin {tg_id} triggered force_check", tg_id=message.from_user.id)
 
@@ -169,9 +189,13 @@ async def cmd_broadcast(message: Message) -> None:
     if not _is_admin(message):
         return
 
+    if _is_admin_throttled(message.from_user.id):
+        await message.answer(f"⏳ Подождите {settings.ADMIN_COOLDOWN_SECONDS}s между действиями.")
+        return
+
     text = message.text
     from bot.core.translations import t
-    
+
     if text is None:
         await message.answer(t("admin_broadcast_empty", None))
         return
@@ -235,12 +259,15 @@ async def cb_broadcast_confirm(callback: CallbackQuery, bot: Bot) -> None:
 
     async def _progress(done: int, total: int) -> None:
         try:
-            await status_msg.edit_text(f"📤 Отправляю... {done}/{total}")
+            await status_msg.edit_text(
+                t("admin_broadcast_progress", None, done=done, total=total)
+            )
         except Exception:
             pass
 
     success, failed = await broadcast_text(bot, payload, progress_cb=_progress)
-    
+
+    _mark_admin_action(tg_id)
     await callback.message.edit_text(
         t("admin_broadcast_done", None, success=success, failed=failed),
         parse_mode="HTML",
@@ -266,3 +293,70 @@ async def cb_broadcast_cancel(callback: CallbackQuery) -> None:
     _pending_broadcast.pop(tg_id, None)
     await callback.message.delete()
     await callback.answer(t("admin_broadcast_cancelled", None))
+
+
+@router.message(Command("backfill"))
+async def cmd_backfill(message: Message, bot: Bot) -> None:
+    """Re-fetch recent giveaways and broadcast any not already in DB (admin only).
+
+    Usage: /backfill [N]
+    N = how many recent giveaways to check (default BACKFILL_DEFAULT_LIMIT, capped at BACKFILL_MAX_LIMIT).
+    """
+    from bot.core.translations import t
+    from bot.services.backfill import backfill_recent_games
+
+    if not _is_admin(message):
+        return
+
+    if _is_admin_throttled(message.from_user.id):
+        await message.answer(
+            t("admin_backfill_throttled", None, seconds=settings.ADMIN_COOLDOWN_SECONDS)
+        )
+        return
+
+    text = message.text or ""
+    payload = text.removeprefix("/backfill").strip()
+    limit = settings.BACKFILL_DEFAULT_LIMIT
+    if payload:
+        try:
+            limit = int(payload)
+        except ValueError:
+            await message.answer(
+                t(
+                    "admin_backfill_usage",
+                    None,
+                    default=settings.BACKFILL_DEFAULT_LIMIT,
+                    max=settings.BACKFILL_MAX_LIMIT,
+                )
+            )
+            return
+        if limit <= 0 or limit > settings.BACKFILL_MAX_LIMIT:
+            await message.answer(
+                t(
+                    "admin_backfill_usage",
+                    None,
+                    default=settings.BACKFILL_DEFAULT_LIMIT,
+                    max=settings.BACKFILL_MAX_LIMIT,
+                )
+            )
+            return
+
+    _mark_admin_action(message.from_user.id)
+    status_msg = await message.answer(f"🔄 Running backfill (limit={limit})…")
+    logger.info("Admin {tg_id} triggered backfill (limit={n})", tg_id=message.from_user.id, n=limit)
+
+    fetched, already_known, broadcasted = await backfill_recent_games(bot, limit)
+
+    if fetched == 0 and already_known == 0 and broadcasted == 0:
+        await status_msg.edit_text(t("admin_backfill_empty", None))
+    else:
+        await status_msg.edit_text(
+            t(
+                "admin_backfill_done",
+                None,
+                fetched=fetched,
+                already_known=already_known,
+                broadcasted=broadcasted,
+            ),
+            parse_mode="HTML",
+        )

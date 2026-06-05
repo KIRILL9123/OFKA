@@ -258,6 +258,18 @@ _TEXTS: dict[str, dict[str, str]] = {
         "en": "📊 Stats",
         "de": "📊 Statistik",
     },
+    "btn_settings": {
+        "ru": "⚙️ Настройки",
+        "uk": "⚙️ Налаштування",
+        "en": "⚙️ Settings",
+        "de": "⚙️ Einstellungen",
+    },
+    "btn_help": {
+        "ru": "ℹ️ Помощь",
+        "uk": "ℹ️ Довідка",
+        "en": "ℹ️ Help",
+        "de": "ℹ️ Hilfe",
+    },
     "btn_claimed": {
         "ru": "✅ Получил",
         "uk": "✅ Отримав",
@@ -420,6 +432,12 @@ _TEXTS: dict[str, dict[str, str]] = {
         "en": "📤 Broadcasting…",
         "de": "📤 Wird gesendet…",
     },
+    "admin_broadcast_progress": {
+        "ru": "📤 Отправляю… {done}/{total}",
+        "uk": "📤 Відправляю… {done}/{total}",
+        "en": "📤 Sending… {done}/{total}",
+        "de": "📤 Sende… {done}/{total}",
+    },
     "admin_broadcast_done": {
         "ru": "✅ Рассылка завершена.\nДоставлено: <b>{success}</b> | Не удалось: <b>{failed}</b>",
         "uk": "✅ Розсилка завершена.\nДоставлено: <b>{success}</b> | Не вдалось: <b>{failed}</b>",
@@ -431,6 +449,30 @@ _TEXTS: dict[str, dict[str, str]] = {
         "uk": "Розсилку скасовано.",
         "en": "Broadcast cancelled.",
         "de": "Broadcast abgebrochen.",
+    },
+    "admin_backfill_usage": {
+        "ru": "❌ Использование: /backfill [N]\nN — сколько последних раздач проверить (по умолчанию {default}, макс. {max}).",
+        "uk": "❌ Використання: /backfill [N]\nN — скільки останніх роздач перевірити (за замовчуванням {default}, макс. {max}).",
+        "en": "❌ Usage: /backfill [N]\nN — how many recent giveaways to check (default {default}, max {max}).",
+        "de": "❌ Verwendung: /backfill [N]\nN — wie viele aktuelle Giveaways geprüft werden (Standard {default}, max {max}).",
+    },
+    "admin_backfill_done": {
+        "ru": "🔄 Backfill завершён.\nПроверено: <b>{fetched}</b>\nУже в БД: <b>{already_known}</b>\nРазослано: <b>{broadcasted}</b>",
+        "uk": "🔄 Backfill завершено.\nПеревірено: <b>{fetched}</b>\nВже в БД: <b>{already_known}</b>\nРозіслано: <b>{broadcasted}</b>",
+        "en": "🔄 Backfill done.\nChecked: <b>{fetched}</b>\nAlready in DB: <b>{already_known}</b>\nBroadcasted: <b>{broadcasted}</b>",
+        "de": "🔄 Backfill abgeschlossen.\nGeprüft: <b>{fetched}</b>\nBereits in DB: <b>{already_known}</b>\nGesendet: <b>{broadcasted}</b>",
+    },
+    "admin_backfill_empty": {
+        "ru": "😴 GamerPower сейчас не возвращает раздач.",
+        "uk": "😴 GamerPower зараз не повертає роздач.",
+        "en": "😴 GamerPower returned no giveaways right now.",
+        "de": "😴 GamerPower liefert aktuell keine Giveaways.",
+    },
+    "admin_backfill_throttled": {
+        "ru": "⏳ Подождите {seconds}s между действиями.",
+        "uk": "⏳ Зачекайте {seconds}s між діями.",
+        "en": "⏳ Wait {seconds}s between actions.",
+        "de": "⏳ Bitte {seconds}s zwischen Aktionen warten.",
     },
 }
 

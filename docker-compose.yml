@@ -22,7 +22,7 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD", "python", "-c", "import bot.core.config"]
+      test: ["CMD", "python", "-m", "bot.core.healthcheck"]
       interval: 60s
       timeout: 10s
       retries: 3

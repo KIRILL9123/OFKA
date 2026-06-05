@@ -247,8 +247,12 @@ def build_game_keyboard(game: dict[str, Any], lang: str | None) -> InlineKeyboar
 
 def build_game_keyboard_from_db(game: Game, lang: str | None) -> InlineKeyboardMarkup:
     """Build keyboard for reminders using a Game ORM model instance."""
-    fallback_url = f"https://www.gamerpower.com/giveaways/{game.external_id}"
-    return _build_action_keyboard(game.external_id, fallback_url, lang)
+    url = (
+        game.open_giveaway_url
+        if getattr(game, "open_giveaway_url", None)
+        else f"https://www.gamerpower.com/giveaways/{game.external_id}"
+    )
+    return _build_action_keyboard(game.external_id, url, lang)
 
 
 async def send_game_to_user(
@@ -344,6 +348,12 @@ async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
     failed = 0
     deactivated_ids: list[int] = []
     delivered_tg_ids: list[int] = []
+    game_external_id = game.get("id")
+    log = logger.bind(
+        event="broadcast_game",
+        giveaway_id=game_external_id,
+        title=game.get("title"),
+    )
 
     # Stream users in batches of 500 to avoid memory spikes
     async with async_session() as session:
@@ -357,7 +367,7 @@ async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
                 User.pref_other,
             ).where(User.is_active.is_(True))
         )
-        
+
         # Process users as they stream from the database (batch by batch)
         async for tg_id, lang, pref_steam, pref_epic, pref_gog, pref_other in result.yield_per(500).tuples():
 
@@ -378,7 +388,7 @@ async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
                 failed += 1
                 deactivated_ids.append(tg_id)
             await asyncio.sleep(SEND_DELAY)
-        
+
         # Batch-deactivate blocked users within same session
         if deactivated_ids:
             await session.execute(
@@ -387,9 +397,8 @@ async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
                 .values(is_active=False)
             )
             await session.commit()
-            logger.info("Deactivated {count} blocked users", count=len(deactivated_ids))
+            log.info("Deactivated {count} blocked users", count=len(deactivated_ids))
 
-    game_external_id = game.get("id")
     if delivered_tg_ids and isinstance(game_external_id, int):
         async with async_session() as session:
             await session.execute(
@@ -405,13 +414,12 @@ async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
                 ).on_conflict_do_nothing(index_elements=["tg_id", "game_external_id"])
             )
             await session.commit()
-        logger.info(
-            "Recorded {n} UserGame notified entries for game {gid}",
+        log.info(
+            "Recorded {n} UserGame notified entries",
             n=len(delivered_tg_ids),
-            gid=game_external_id,
         )
 
-    logger.info(
+    log.info(
         "Broadcast complete: {ok} delivered, {fail} failed",
         ok=success,
         fail=failed,

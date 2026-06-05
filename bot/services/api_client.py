@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-import time as _time_module
 from typing import Any
 
 import aiohttp
@@ -123,7 +122,7 @@ async def fetch_free_games() -> list[dict[str, Any]]:
                     if games:
                         global _games_cache, _cache_updated_at
                         _games_cache = games
-                        _cache_updated_at = _time_module.monotonic()
+                        _cache_updated_at = time.monotonic()
                     return games
 
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:

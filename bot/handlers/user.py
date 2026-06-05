@@ -20,6 +20,10 @@ from bot.core.database import async_session
 from bot.core.translations import LANG_LABELS, t
 from bot.models.models import User, UserGame
 from bot.services.game_display import show_active_games_to_user
+from bot.services.user_service import (
+    get_or_create_user,
+    is_rate_limited,
+)
 
 router = Router(name="user")
 
@@ -38,78 +42,10 @@ PLATFORM_FIELDS: dict[str, str] = {
     "other": "pref_other",
 }
 
-# Rate-limiting: track user action timestamps
-_user_rate_limit: dict[int, list[float]] = {}
-_user_rate_limit_lock = asyncio.Lock()
-_rate_limit_cleanup_running = True
-
-
-async def _is_rate_limited(tg_id: int) -> bool:
-    """Check if user has exceeded rate limit (prevent spam/DoS)."""
-    import time
-
-    now = time.time()
-    cutoff = now - 60  # Last minute
-
-    async with _user_rate_limit_lock:
-        if tg_id not in _user_rate_limit:
-            _user_rate_limit[tg_id] = [now]
-            return False
-
-        # Remove old timestamps
-        _user_rate_limit[tg_id] = [ts for ts in _user_rate_limit[tg_id] if ts > cutoff]
-        if not _user_rate_limit[tg_id]:
-            del _user_rate_limit[tg_id]
-            _user_rate_limit[tg_id] = [now]
-            return False
-
-        if len(_user_rate_limit[tg_id]) >= settings.USER_RATE_LIMIT_PER_MINUTE:
-            return True
-
-        _user_rate_limit[tg_id].append(now)
-        return False
-
-
-async def _cleanup_rate_limit_cache() -> None:
-    """Background task to evict stale user rate-limit entries."""
-    import time
-
-    while _rate_limit_cleanup_running:
-        try:
-            await asyncio.sleep(300)
-            if not _rate_limit_cleanup_running:
-                break
-
-            now = time.time()
-            cutoff = now - 60
-            async with _user_rate_limit_lock:
-                stale_ids = [
-                    tg_id
-                    for tg_id, timestamps in _user_rate_limit.items()
-                    if timestamps and all(ts <= cutoff for ts in timestamps)
-                ]
-                for tg_id in stale_ids:
-                    _user_rate_limit.pop(tg_id, None)
-
-            logger.debug(
-                "Rate limit cache cleaned: removed {n} stale entries",
-                n=len(stale_ids),
-            )
-        except Exception as exc:
-            logger.error("Error in _cleanup_rate_limit_cache: {exc}", exc=exc)
-
-
-async def start_rate_limit_cleanup() -> None:
-    """Start background cleanup task for in-memory rate-limit cache."""
-    global _rate_limit_cleanup_running
-    _rate_limit_cleanup_running = True
-    asyncio.create_task(_cleanup_rate_limit_cache())
-
-
-async def stop_rate_limit_cleanup() -> None:
-    """Signal background cleanup task to stop gracefully."""
-    global _rate_limit_cleanup_running
-    _rate_limit_cleanup_running = False
+# Backwards-compat shims — re-exported for tests and other modules
+# that previously imported the underscore-prefixed names from this module.
+_is_rate_limited = is_rate_limited
+_get_or_create_user = get_or_create_user
 
 
 def _validate_callback_data(data: str, max_length: int | None = None) -> bool:
@@ -138,7 +74,7 @@ def _main_menu_keyboard(lang: str | None = None) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=t("btn_games", lang)), KeyboardButton(text=t("btn_stats", lang))],
-            [KeyboardButton(text="⚙️ Settings"), KeyboardButton(text="ℹ️ Help")],
+            [KeyboardButton(text=t("btn_settings", lang)), KeyboardButton(text=t("btn_help", lang))],
         ],
         resize_keyboard=True,
     )
@@ -342,13 +278,13 @@ async def cmd_settings(message: Message) -> None:
     )
 
 
-@router.message(F.text == "⚙️ Settings")
+@router.message(F.text.in_({t("btn_settings", "ru"), t("btn_settings", "uk"), t("btn_settings", "en"), t("btn_settings", "de")}))
 async def open_settings_button(message: Message) -> None:
     """Open settings when user taps reply keyboard button."""
     await cmd_settings(message)
 
 
-@router.message(F.text == "ℹ️ Help")
+@router.message(F.text.in_({t("btn_help", "ru"), t("btn_help", "uk"), t("btn_help", "en"), t("btn_help", "de")}))
 async def open_help_button(message: Message) -> None:
     """Open help when user taps reply keyboard button."""
     await cmd_help(message)

@@ -7,6 +7,8 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.venv/
+venv/
 
 # Docker dev override — only for local machines, never commit
 docker-compose.override.yml

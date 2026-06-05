@@ -56,6 +56,11 @@ class Game(Base):
     external_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     worth: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    end_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    thumbnail: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    platforms: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    description: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    open_giveaway_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     sent_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )

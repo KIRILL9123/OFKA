@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from alembic import command
@@ -15,15 +15,17 @@ from aiogram.types import URLInputFile
 from aiogram.types import BotCommand, BotCommandScopeDefault
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
-from sqlalchemy import and_, select, update
+from sqlalchemy import and_, or_, select, update
 
 from bot.core.config import settings
 from bot.core.database import async_session, engine, get_effective_database_url
 from bot.core.translations import t
 from bot.handlers import admin, games, user
+from bot.handlers.admin import _start_cleanup_task, stop_cleanup_task
 from bot.models.models import Game, User, UserGame
 from bot.services.api_client import fetch_free_games
 from bot.services.broadcaster import broadcast_game, build_game_keyboard_from_db
+from bot.services.user_service import start_rate_limit_cleanup, stop_rate_limit_cleanup
 from bot.utils.dates import format_end_date
 
 # ---------------------------------------------------------------------------
@@ -84,6 +86,11 @@ async def check_new_games(bot: Bot) -> None:
                         external_id=external_id,
                         title=games_by_external_id[external_id].get("title") or "Unknown",
                         worth=games_by_external_id[external_id].get("worth"),
+                        end_date=games_by_external_id[external_id].get("end_date"),
+                        thumbnail=games_by_external_id[external_id].get("thumbnail"),
+                        platforms=games_by_external_id[external_id].get("platforms"),
+                        description=games_by_external_id[external_id].get("description"),
+                        open_giveaway_url=games_by_external_id[external_id].get("open_giveaway_url"),
                     )
                     for external_id in new_ids
                 ]
@@ -91,29 +98,19 @@ async def check_new_games(bot: Bot) -> None:
             await session.commit()
 
     new_count = 0
-    seen_ids: set[int] = set()
-    deduplicated = []
-    for game in new_games:
-        external_id = game.get("id")
-        if isinstance(external_id, int) and external_id not in seen_ids:
-            seen_ids.add(external_id)
-            deduplicated.append(game)
-    new_games = deduplicated
-
     for game in new_games:
         # Validate game has required fields and is not expired
         if not game.get("title") or not game.get("id"):
             logger.warning("Skipping invalid game: {game}", game=game)
             continue
-        
+
         # Skip expired games
         end_date_raw = game.get("end_date", "")
         if end_date_raw and end_date_raw != "N/A":
-            formatted_date = format_end_date(end_date_raw)
-            if formatted_date is None:  # Expired
+            if format_end_date(end_date_raw) is None:  # Expired
                 logger.info("Skipping expired game: {title}", title=game.get("title"))
                 continue
-        
+
         logger.info("New giveaway detected: {title}", title=game.get("title"))
         new_count += 1
         await broadcast_game(bot, game)
@@ -122,9 +119,21 @@ async def check_new_games(bot: Bot) -> None:
 
 
 async def send_reminders(bot: Bot) -> None:
-    """Send reminders for unclaimed/remind_pending games older than 24 hours."""
-    logger.info("Running daily reminder job")
-    cutoff = datetime.utcnow() - timedelta(hours=24)
+    """Send reminders for unclaimed games and explicit 'remind me tomorrow' requests."""
+    log = logger.bind(event="reminder_job")
+    log.info("Running daily reminder job")
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=24)
+
+    auto_remind_filter = and_(
+        UserGame.status == "notified",
+        UserGame.updated_at < cutoff,
+    )
+    explicit_remind_filter = and_(
+        UserGame.status == "remind",
+        UserGame.remind_at.is_not(None),
+        UserGame.remind_at <= now,
+    )
 
     async with async_session() as session:
         result = await session.execute(
@@ -134,15 +143,14 @@ async def send_reminders(bot: Bot) -> None:
             .where(
                 and_(
                     User.is_active.is_(True),
-                    UserGame.status.in_(["notified", "remind_pending"]),
-                    UserGame.updated_at < cutoff,
+                    or_(auto_remind_filter, explicit_remind_filter),
                 )
             )
         )
         rows = result.all()
 
     reminded_ids: list[int] = []
-    for user_game, game, user in rows:
+    for user_game, game, user_row in rows:
         # Skip if game is expired
         end_date = getattr(game, "end_date", None)
         if end_date:
@@ -150,7 +158,7 @@ async def send_reminders(bot: Bot) -> None:
                 reminded_ids.append(user_game.id)
                 continue
 
-        lang = user.language
+        lang = user_row.language
         text_msg = t(
             "reminder_message",
             lang,
@@ -180,9 +188,10 @@ async def send_reminders(bot: Bot) -> None:
         except TelegramForbiddenError:
             reminded_ids.append(user_game.id)
         except Exception as exc:
-            logger.warning(
-                "Failed to send reminder to {tg_id}: {exc}",
-                tg_id=user_game.tg_id,
+            log.warning(
+                "Failed to send reminder",
+                user_id=user_game.tg_id,
+                giveaway_id=user_game.game_external_id,
                 exc=exc,
             )
 
@@ -195,7 +204,7 @@ async def send_reminders(bot: Bot) -> None:
             )
             await session.commit()
 
-    logger.info("Reminder job complete — sent {n} reminders", n=len(reminded_ids))
+    log.info("Reminder job complete", sent=len(reminded_ids))
 
 
 def _to_sync_db_url(database_url: str) -> str:
@@ -228,8 +237,6 @@ async def on_startup(bot: Bot) -> None:
     logger.info("Database migrations applied")
     
     # Start background cleanup task for broadcast TTL
-    from bot.handlers.admin import _start_cleanup_task
-    from bot.handlers.user import start_rate_limit_cleanup
     await _start_cleanup_task()
     await start_rate_limit_cleanup()
 
@@ -252,8 +259,6 @@ async def on_startup(bot: Bot) -> None:
 async def on_shutdown(bot: Bot) -> None:
     """Clean up on shutdown."""
     # Stop cleanup task gracefully
-    from bot.handlers.admin import stop_cleanup_task
-    from bot.handlers.user import stop_rate_limit_cleanup
     await stop_cleanup_task()
     await stop_rate_limit_cleanup()
     

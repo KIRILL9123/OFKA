@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     MAX_MESSAGE_LENGTH: int = 4096
     USER_RATE_LIMIT_PER_MINUTE: int = 30
     SPAM_COOLDOWN_SECONDS: int = 1
+    ADMIN_COOLDOWN_SECONDS: int = 30
+    BACKFILL_DEFAULT_LIMIT: int = 20
+    BACKFILL_MAX_LIMIT: int = 100
     GAMERPOWER_API_URL: str = (
         "https://www.gamerpower.com/api/filter"
         "?platform=pc&type=game&sort-by=date"

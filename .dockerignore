@@ -1,0 +1,42 @@
+# Local Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Test / dev
+tests/
+scripts/
+*.db
+*.db-shm
+*.db-wal
+
+# Data (kept in volume at runtime)
+data/
+
+# Git / IDE / OS
+.git/
+.gitignore
+.gitattributes
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Docs and config that aren't needed in the image
+*.md
+LICENSE
+.editorconfig
+docker-compose.override.yml
+.env
+.env.*
+!.env.example
