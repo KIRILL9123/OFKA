@@ -7,6 +7,7 @@ from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 
+import bot.main as main_module
 from bot.main import check_new_games
 
 
@@ -104,3 +105,15 @@ async def test_expired_game_not_broadcasted() -> None:
                     await check_new_games(AsyncMock())
 
     broadcast_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_check_new_games_skips_overlapping_run() -> None:
+    await main_module._check_new_games_lock.acquire()
+    try:
+        with patch("bot.main.fetch_free_games", new=AsyncMock(return_value=[{"id": 1, "title": "A"}])) as fetch_mock:
+            await check_new_games(AsyncMock())
+    finally:
+        main_module._check_new_games_lock.release()
+
+    fetch_mock.assert_not_awaited()

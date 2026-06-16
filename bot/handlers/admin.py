@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 import asyncio
+from contextlib import suppress
 import time
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
@@ -13,6 +14,7 @@ from sqlalchemy import func, select
 
 from bot.core.config import settings
 from bot.core.database import async_session
+from bot.core.translations import t
 from bot.models.models import Game, User, UserGame
 from bot.services.broadcaster import broadcast_text
 
@@ -27,6 +29,7 @@ _admin_last_expensive: dict[int, float] = {}
 
 # Flag to control cleanup task lifecycle
 _cleanup_running = True
+_cleanup_task: asyncio.Task | None = None
 
 
 def _is_admin_throttled(tg_id: int) -> bool:
@@ -65,6 +68,8 @@ async def _cleanup_expired_broadcasts() -> None:
                     "Auto-cleaned expired broadcast for admin {tg_id}",
                     tg_id=tg_id,
                 )
+        except asyncio.CancelledError:
+            break
         except Exception as exc:
             logger.error("Error in _cleanup_expired_broadcasts: {exc}", exc=exc)
 
@@ -74,14 +79,24 @@ async def _start_cleanup_task() -> None:
     
     Must be called as: await _start_cleanup_task() from async context.
     """
-    asyncio.create_task(_cleanup_expired_broadcasts())
+    global _cleanup_running, _cleanup_task
+    _cleanup_running = True
+    if _cleanup_task is not None and not _cleanup_task.done():
+        logger.info("Broadcast TTL cleanup task already running")
+        return
+    _cleanup_task = asyncio.create_task(_cleanup_expired_broadcasts())
     logger.info("Started background cleanup task for broadcast TTL")
 
 
 async def stop_cleanup_task() -> None:
     """Stop the cleanup task gracefully during shutdown."""
-    global _cleanup_running
+    global _cleanup_running, _cleanup_task
     _cleanup_running = False
+    if _cleanup_task is not None:
+        _cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await _cleanup_task
+        _cleanup_task = None
     logger.info("Stopped background cleanup task")
 
 
@@ -166,7 +181,9 @@ async def cmd_force_check(message: Message, bot: Bot) -> None:
         return
 
     if _is_admin_throttled(message.from_user.id):
-        await message.answer(f"⏳ Подождите {settings.ADMIN_COOLDOWN_SECONDS}s между действиями.")
+        await message.answer(
+            t("admin_backfill_throttled", None, seconds=settings.ADMIN_COOLDOWN_SECONDS)
+        )
         return
 
     _mark_admin_action(message.from_user.id)
@@ -176,7 +193,12 @@ async def cmd_force_check(message: Message, bot: Bot) -> None:
     # Late import to avoid circular dependency
     from bot.main import check_new_games
 
-    await check_new_games(bot)
+    try:
+        await check_new_games(bot)
+    except Exception:
+        logger.exception("force_check failed for admin {tg_id}", tg_id=message.from_user.id)
+        await message.answer(t("admin_operation_failed", None))
+        return
     await message.answer("✅ Force check complete.")
 
 
@@ -190,12 +212,12 @@ async def cmd_broadcast(message: Message) -> None:
         return
 
     if _is_admin_throttled(message.from_user.id):
-        await message.answer(f"⏳ Подождите {settings.ADMIN_COOLDOWN_SECONDS}s между действиями.")
+        await message.answer(
+            t("admin_backfill_throttled", None, seconds=settings.ADMIN_COOLDOWN_SECONDS)
+        )
         return
 
     text = message.text
-    from bot.core.translations import t
-
     if text is None:
         await message.answer(t("admin_broadcast_empty", None))
         return
@@ -236,8 +258,6 @@ async def cmd_broadcast(message: Message) -> None:
 @router.callback_query(F.data == "broadcast:confirm")
 async def cb_broadcast_confirm(callback: CallbackQuery, bot: Bot) -> None:
     """Confirm and send the broadcast message."""
-    from bot.core.translations import t
-    
     tg_id = callback.from_user.id
     if tg_id != settings.ADMIN_ID:
         await callback.answer(t("admin_unauthorized", None), show_alert=True)
@@ -283,8 +303,6 @@ async def cb_broadcast_confirm(callback: CallbackQuery, bot: Bot) -> None:
 @router.callback_query(F.data == "broadcast:cancel")
 async def cb_broadcast_cancel(callback: CallbackQuery) -> None:
     """Cancel pending broadcast."""
-    from bot.core.translations import t
-    
     tg_id = callback.from_user.id
     if tg_id != settings.ADMIN_ID:
         await callback.answer(t("admin_unauthorized", None), show_alert=True)
@@ -302,7 +320,6 @@ async def cmd_backfill(message: Message, bot: Bot) -> None:
     Usage: /backfill [N]
     N = how many recent giveaways to check (default BACKFILL_DEFAULT_LIMIT, capped at BACKFILL_MAX_LIMIT).
     """
-    from bot.core.translations import t
     from bot.services.backfill import backfill_recent_games
 
     if not _is_admin(message):
@@ -345,7 +362,12 @@ async def cmd_backfill(message: Message, bot: Bot) -> None:
     status_msg = await message.answer(f"🔄 Running backfill (limit={limit})…")
     logger.info("Admin {tg_id} triggered backfill (limit={n})", tg_id=message.from_user.id, n=limit)
 
-    fetched, already_known, broadcasted = await backfill_recent_games(bot, limit)
+    try:
+        fetched, already_known, broadcasted = await backfill_recent_games(bot, limit)
+    except Exception:
+        logger.exception("backfill failed for admin {tg_id}", tg_id=message.from_user.id)
+        await status_msg.edit_text(t("admin_operation_failed", None))
+        return
 
     if fetched == 0 and already_known == 0 and broadcasted == 0:
         await status_msg.edit_text(t("admin_backfill_empty", None))

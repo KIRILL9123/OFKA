@@ -20,6 +20,8 @@ class _Response:
         self.headers: dict[str, str] = {}
 
     async def json(self, content_type: str | None = None) -> Any:
+        if isinstance(self._payload, Exception):
+            raise self._payload
         return self._payload
 
 
@@ -137,3 +139,20 @@ async def test_fetch_free_games_retries_on_503() -> None:
     assert result == [{'id': 99, 'title': 'Recovered', 'status': 'active'}]
     assert session.calls == 3
     assert sleep_mock.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_fetch_free_games_retries_on_malformed_json() -> None:
+    responses = [
+        _Response(status=200, payload=ValueError("bad json")),
+        _Response(status=200, payload=[{"id": 10, "title": "Ok", "status": "active"}]),
+    ]
+    session = _Session(responses)
+
+    with patch("bot.services.api_client.aiohttp.ClientSession", return_value=_SessionContext(session)):
+        with patch("bot.services.api_client.asyncio.sleep", new=AsyncMock()) as sleep_mock:
+            result = await api_client.fetch_free_games()
+
+    assert result == [{"id": 10, "title": "Ok", "status": "active"}]
+    assert session.calls == 2
+    assert sleep_mock.await_count == 1

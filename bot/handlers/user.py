@@ -429,7 +429,8 @@ async def cb_toggle_platform(callback: CallbackQuery) -> None:
             tg_id=callback.from_user.id,
             data=callback.data[:50],
         )
-        await callback.answer("⚠️ Invalid request. Please try again.", show_alert=False)
+        lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
+        await callback.answer(t("invalid_request", lang), show_alert=False)
         return
 
     platform = callback.data.removeprefix(TOGGLE_CALLBACK_PREFIX)
@@ -511,7 +512,8 @@ async def cb_set_language(callback: CallbackQuery) -> None:
             "Invalid language callback from user {tg_id}",
             tg_id=callback.from_user.id,
         )
-        await callback.answer("⚠️ Invalid request.", show_alert=False)
+        lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
+        await callback.answer(t("invalid_request", lang), show_alert=False)
         return
 
     lang = callback.data.removeprefix(LANG_CALLBACK_PREFIX)
@@ -529,7 +531,8 @@ async def cb_set_language(callback: CallbackQuery) -> None:
 
     # Rate-limit check
     if await _is_rate_limited(tg_id):
-        await callback.answer("⏳ Too many requests. Please wait.", show_alert=False)
+        current_lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+        await callback.answer(t("rate_limit_message", current_lang), show_alert=False)
         return
 
     async with async_session() as session:
@@ -560,7 +563,8 @@ async def cb_done_settings(callback: CallbackQuery) -> None:
             "Invalid callback data in DONE_CB from user {tg_id}",
             tg_id=callback.from_user.id,
         )
-        await callback.answer("⚠️ Invalid request.", show_alert=False)
+        lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
+        await callback.answer(t("invalid_request", lang), show_alert=False)
         return
     
     # Rate-limit check

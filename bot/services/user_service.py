@@ -7,6 +7,7 @@ without creating circular dependencies.
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import time
 
 from sqlalchemy import select
@@ -19,6 +20,7 @@ from bot.models.models import User
 _user_rate_limit: dict[int, list[float]] = {}
 _user_rate_limit_lock = asyncio.Lock()
 _rate_limit_cleanup_running = True
+_rate_limit_cleanup_task: asyncio.Task | None = None
 
 
 async def is_rate_limited(tg_id: int) -> bool:
@@ -62,21 +64,30 @@ async def _cleanup_rate_limit_cache() -> None:
                 ]
                 for tg_id in stale_ids:
                     _user_rate_limit.pop(tg_id, None)
+        except asyncio.CancelledError:
+            break
         except Exception:
             pass
 
 
 async def start_rate_limit_cleanup() -> None:
     """Start background cleanup task for in-memory rate-limit cache."""
-    global _rate_limit_cleanup_running
+    global _rate_limit_cleanup_running, _rate_limit_cleanup_task
     _rate_limit_cleanup_running = True
-    asyncio.create_task(_cleanup_rate_limit_cache())
+    if _rate_limit_cleanup_task is not None and not _rate_limit_cleanup_task.done():
+        return
+    _rate_limit_cleanup_task = asyncio.create_task(_cleanup_rate_limit_cache())
 
 
 async def stop_rate_limit_cleanup() -> None:
     """Signal background cleanup task to stop gracefully."""
-    global _rate_limit_cleanup_running
+    global _rate_limit_cleanup_running, _rate_limit_cleanup_task
     _rate_limit_cleanup_running = False
+    if _rate_limit_cleanup_task is not None:
+        _rate_limit_cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await _rate_limit_cleanup_task
+        _rate_limit_cleanup_task = None
 
 
 async def get_or_create_user(
