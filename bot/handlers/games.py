@@ -43,9 +43,11 @@ async def _upsert_user_game_state(
                 UserGame.game_external_id == game_external_id,
             )
         )
-        row = existing_result.first()
-        if row is not None and row[0] == status and row[1] == remind_at:
-            return False
+        existing = existing_result.first()
+        if existing is not None:
+            existing_status, existing_remind_at = existing
+            if existing_status == status and existing_remind_at == remind_at:
+                return False
 
         stmt = sqlite_insert(UserGame).values(
             tg_id=tg_id,

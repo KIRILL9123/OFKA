@@ -480,6 +480,12 @@ _TEXTS: dict[str, dict[str, str]] = {
         "en": "⏳ Wait {seconds}s between actions.",
         "de": "⏳ Bitte {seconds}s zwischen Aktionen warten.",
     },
+    "admin_action_throttled": {
+        "ru": "⏳ Подождите {seconds}s между действиями.",
+        "uk": "⏳ Зачекайте {seconds}s між діями.",
+        "en": "⏳ Wait {seconds}s between actions.",
+        "de": "⏳ Bitte {seconds}s zwischen Aktionen warten.",
+    },
     "admin_operation_failed": {
         "ru": "❌ Операция завершилась с ошибкой. Проверьте логи и попробуйте снова.",
         "uk": "❌ Операція завершилась з помилкою. Перевірте логи та спробуйте ще раз.",

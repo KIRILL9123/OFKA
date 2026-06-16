@@ -182,7 +182,7 @@ async def cmd_force_check(message: Message, bot: Bot) -> None:
 
     if _is_admin_throttled(message.from_user.id):
         await message.answer(
-            t("admin_backfill_throttled", None, seconds=settings.ADMIN_COOLDOWN_SECONDS)
+            t("admin_action_throttled", None, seconds=settings.ADMIN_COOLDOWN_SECONDS)
         )
         return
 
@@ -213,7 +213,7 @@ async def cmd_broadcast(message: Message) -> None:
 
     if _is_admin_throttled(message.from_user.id):
         await message.answer(
-            t("admin_backfill_throttled", None, seconds=settings.ADMIN_COOLDOWN_SECONDS)
+            t("admin_action_throttled", None, seconds=settings.ADMIN_COOLDOWN_SECONDS)
         )
         return
 
@@ -327,7 +327,7 @@ async def cmd_backfill(message: Message, bot: Bot) -> None:
 
     if _is_admin_throttled(message.from_user.id):
         await message.answer(
-            t("admin_backfill_throttled", None, seconds=settings.ADMIN_COOLDOWN_SECONDS)
+            t("admin_action_throttled", None, seconds=settings.ADMIN_COOLDOWN_SECONDS)
         )
         return
 
