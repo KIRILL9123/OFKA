@@ -28,6 +28,9 @@ from bot.services.broadcaster import broadcast_game, build_game_keyboard_from_db
 from bot.services.user_service import start_rate_limit_cleanup, stop_rate_limit_cleanup
 from bot.utils.dates import format_end_date
 
+_check_new_games_lock = asyncio.Lock()
+_send_reminders_lock = asyncio.Lock()
+
 # ---------------------------------------------------------------------------
 # Logging setup
 # ---------------------------------------------------------------------------
@@ -52,74 +55,89 @@ logger.add(
 
 async def check_new_games(bot: Bot) -> None:
     """Fetch giveaways from GamerPower and broadcast any new ones."""
-    logger.info("Running scheduled giveaway check")
-    games = await fetch_free_games()
-
-    if not games:
-        logger.info("No active giveaways found")
+    if _check_new_games_lock.locked():
+        logger.warning("Skipping scheduled giveaway check: previous run still active")
         return
 
-    games_by_external_id: dict[int, dict] = {}
-    for game in games:
-        external_id = game.get("id")
-        if isinstance(external_id, int):
-            games_by_external_id[external_id] = game
+    async with _check_new_games_lock:
+        logger.info("Running scheduled giveaway check")
+        games = await fetch_free_games()
 
-    if not games_by_external_id:
-        logger.info("No valid giveaways with external_id found")
-        return
+        if not games:
+            logger.info("No active giveaways found")
+            return
 
-    external_ids = list(games_by_external_id.keys())
-    async with async_session() as session:
-        existing_result = await session.execute(
-            select(Game.external_id).where(Game.external_id.in_(external_ids))
-        )
-        existing_ids = set(existing_result.scalars().all())
+        games_by_external_id: dict[int, dict] = {}
+        for game in games:
+            external_id = game.get("id")
+            if isinstance(external_id, int):
+                games_by_external_id[external_id] = game
 
-        new_ids = [external_id for external_id in external_ids if external_id not in existing_ids]
-        new_games = [games_by_external_id[external_id] for external_id in new_ids]
+        if not games_by_external_id:
+            logger.info("No valid giveaways with external_id found")
+            return
 
-        if new_games:
-            session.add_all(
-                [
-                    Game(
-                        external_id=external_id,
-                        title=games_by_external_id[external_id].get("title") or "Unknown",
-                        worth=games_by_external_id[external_id].get("worth"),
-                        end_date=games_by_external_id[external_id].get("end_date"),
-                        thumbnail=games_by_external_id[external_id].get("thumbnail"),
-                        platforms=games_by_external_id[external_id].get("platforms"),
-                        description=games_by_external_id[external_id].get("description"),
-                        open_giveaway_url=games_by_external_id[external_id].get("open_giveaway_url"),
-                    )
-                    for external_id in new_ids
-                ]
+        external_ids = list(games_by_external_id.keys())
+        async with async_session() as session:
+            existing_result = await session.execute(
+                select(Game.external_id).where(Game.external_id.in_(external_ids))
             )
-            await session.commit()
+            existing_ids = set(existing_result.scalars().all())
 
-    new_count = 0
-    for game in new_games:
-        # Validate game has required fields and is not expired
-        if not game.get("title") or not game.get("id"):
-            logger.warning("Skipping invalid game: {game}", game=game)
-            continue
+            new_ids = [external_id for external_id in external_ids if external_id not in existing_ids]
+            new_games = [games_by_external_id[external_id] for external_id in new_ids]
 
-        # Skip expired games
-        end_date_raw = game.get("end_date", "")
-        if end_date_raw and end_date_raw != "N/A":
-            if format_end_date(end_date_raw) is None:  # Expired
-                logger.info("Skipping expired game: {title}", title=game.get("title"))
+            if new_games:
+                session.add_all(
+                    [
+                        Game(
+                            external_id=external_id,
+                            title=games_by_external_id[external_id].get("title") or "Unknown",
+                            worth=games_by_external_id[external_id].get("worth"),
+                            end_date=games_by_external_id[external_id].get("end_date"),
+                            thumbnail=games_by_external_id[external_id].get("thumbnail"),
+                            platforms=games_by_external_id[external_id].get("platforms"),
+                            description=games_by_external_id[external_id].get("description"),
+                            open_giveaway_url=games_by_external_id[external_id].get("open_giveaway_url"),
+                        )
+                        for external_id in new_ids
+                    ]
+                )
+                await session.commit()
+
+        new_count = 0
+        for game in new_games:
+            # Validate game has required fields and is not expired
+            if not game.get("title") or not game.get("id"):
+                logger.warning("Skipping invalid game: {game}", game=game)
                 continue
 
-        logger.info("New giveaway detected: {title}", title=game.get("title"))
-        new_count += 1
-        await broadcast_game(bot, game)
+            # Skip expired games
+            end_date_raw = game.get("end_date", "")
+            if end_date_raw and end_date_raw != "N/A":
+                if format_end_date(end_date_raw) is None:  # Expired
+                    logger.info("Skipping expired game: {title}", title=game.get("title"))
+                    continue
 
-    logger.info("Check complete — {n} new game(s) broadcasted", n=new_count)
+            logger.info("New giveaway detected: {title}", title=game.get("title"))
+            new_count += 1
+            await broadcast_game(bot, game)
+
+        logger.info("Check complete — {n} new game(s) broadcasted", n=new_count)
 
 
 async def send_reminders(bot: Bot) -> None:
     """Send reminders for unclaimed games and explicit 'remind me tomorrow' requests."""
+    if _send_reminders_lock.locked():
+        logger.warning("Skipping reminder job: previous run still active")
+        return
+
+    async with _send_reminders_lock:
+        await _send_reminders_impl(bot)
+
+
+async def _send_reminders_impl(bot: Bot) -> None:
+    """Internal reminder sender protected by a non-overlap lock."""
     log = logger.bind(event="reminder_job")
     log.info("Running daily reminder job")
     now = datetime.now(timezone.utc)

@@ -107,9 +107,17 @@ async def fetch_free_games() -> list[dict[str, Any]]:
                         _circuit_breaker.record_success()
                         logger.info("GamerPower returned no active giveaways")
                         return []
+                    if not isinstance(data, list):
+                        _circuit_breaker.record_success()
+                        logger.warning(
+                            "GamerPower returned unexpected payload type: {payload_type}",
+                            payload_type=type(data).__name__,
+                        )
+                        return []
 
                     games: list[dict[str, Any]] = [
                         g for g in data
+                        if isinstance(g, dict)
                         if g.get("status", "").lower() == "active"
                     ]
                     _circuit_breaker.record_success()
@@ -125,7 +133,7 @@ async def fetch_free_games() -> list[dict[str, Any]]:
                         _cache_updated_at = time.monotonic()
                     return games
 
-        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
             last_exc = exc
             if attempt < MAX_RETRIES:
                 sleep_seconds = min(

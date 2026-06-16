@@ -9,6 +9,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 from loguru import logger
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from bot.core.database import async_session
 from bot.core.translations import t
@@ -37,28 +38,32 @@ async def _upsert_user_game_state(
     """Store or update game action state for a user."""
     async with async_session() as session:
         existing_result = await session.execute(
-            select(UserGame).where(
+            select(UserGame.status, UserGame.remind_at).where(
                 UserGame.tg_id == tg_id,
                 UserGame.game_external_id == game_external_id,
             )
         )
-        row = existing_result.scalars().first()
-        if row is None:
-            session.add(
-                UserGame(
-                    tg_id=tg_id,
-                    game_external_id=game_external_id,
-                    status=status,
-                    remind_at=remind_at,
-                )
-            )
-        else:
-            if row.status == status:
+        existing = existing_result.first()
+        if existing is not None:
+            existing_status, existing_remind_at = existing
+            if existing_status == status and existing_remind_at == remind_at:
                 return False
-            row.status = status
-            row.remind_at = remind_at
+
+        stmt = sqlite_insert(UserGame).values(
+            tg_id=tg_id,
+            game_external_id=game_external_id,
+            status=status,
+            remind_at=remind_at,
+        ).on_conflict_do_update(
+            index_elements=["tg_id", "game_external_id"],
+            set_={
+                "status": status,
+                "remind_at": remind_at,
+            },
+        )
 
         try:
+            await session.execute(stmt)
             await session.commit()
         except Exception as commit_exc:
             await session.rollback()

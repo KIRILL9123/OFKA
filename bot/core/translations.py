@@ -384,6 +384,12 @@ _TEXTS: dict[str, dict[str, str]] = {
         "en": "⚠️ Enable at least one platform!",
         "de": "⚠️ Aktivieren Sie mindestens eine Plattform!",
     },
+    "invalid_request": {
+        "ru": "⚠️ Некорректный запрос. Попробуйте ещё раз.",
+        "uk": "⚠️ Некоректний запит. Спробуйте ще раз.",
+        "en": "⚠️ Invalid request. Please try again.",
+        "de": "⚠️ Ungültige Anfrage. Bitte versuche es erneut.",
+    },
     "admin_broadcast_empty": {
         "ru": "❌ Текст сообщения не может быть пустым.",
         "uk": "❌ Текст повідомлення не може бути порожнім.",
@@ -473,6 +479,18 @@ _TEXTS: dict[str, dict[str, str]] = {
         "uk": "⏳ Зачекайте {seconds}s між діями.",
         "en": "⏳ Wait {seconds}s between actions.",
         "de": "⏳ Bitte {seconds}s zwischen Aktionen warten.",
+    },
+    "admin_action_throttled": {
+        "ru": "⏳ Подождите {seconds}s между действиями.",
+        "uk": "⏳ Зачекайте {seconds}s між діями.",
+        "en": "⏳ Wait {seconds}s between actions.",
+        "de": "⏳ Bitte {seconds}s zwischen Aktionen warten.",
+    },
+    "admin_operation_failed": {
+        "ru": "❌ Операция завершилась с ошибкой. Проверьте логи и попробуйте снова.",
+        "uk": "❌ Операція завершилась з помилкою. Перевірте логи та спробуйте ще раз.",
+        "en": "❌ Operation failed. Check logs and try again.",
+        "de": "❌ Vorgang fehlgeschlagen. Prüfe die Logs und versuche es erneut.",
     },
 }
 
