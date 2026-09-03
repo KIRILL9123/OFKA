@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from bot.core.config import settings
@@ -29,6 +30,15 @@ def get_effective_database_url() -> str:
 
 
 engine = create_async_engine(get_effective_database_url(), echo=False)
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _set_sqlite_pragma(dbapi_connection: object, _record: object) -> None:
+    """Enforce referential integrity for every SQLite connection."""
+    cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
 
 async_session = async_sessionmaker(
     bind=engine,

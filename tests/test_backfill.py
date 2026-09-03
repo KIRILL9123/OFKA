@@ -131,6 +131,7 @@ def test_cmd_backfill_rejects_non_admin(monkeypatch) -> None:
         answer=AsyncMock(),
     )
     import asyncio
+
     asyncio.run(cmd_backfill(msg, bot=AsyncMock()))
 
     assert called == []
@@ -151,6 +152,7 @@ def test_cmd_backfill_rejects_invalid_n(monkeypatch) -> None:
         answer=AsyncMock(),
     )
     import asyncio
+
     asyncio.run(cmd_backfill(msg, bot=AsyncMock()))
 
     msg.answer.assert_awaited_once()

@@ -65,30 +65,25 @@ async def backfill_recent_games(bot, limit: int) -> tuple[int, int, int]:
                 continue
         new_games.append(game)
 
-    # Insert into DB
-    if new_games:
-        async with async_session() as session:
-            session.add_all(
-                [
-                    Game(
-                        external_id=g.get("id"),
-                        title=g.get("title") or "Unknown",
-                        worth=g.get("worth"),
-                        end_date=g.get("end_date"),
-                        thumbnail=g.get("thumbnail"),
-                        platforms=g.get("platforms"),
-                        description=g.get("description"),
-                        open_giveaway_url=g.get("open_giveaway_url"),
-                    )
-                    for g in new_games
-                ]
-            )
-            await session.commit()
-
-    # Broadcast new games
+    # Broadcast first, record each game in the DB after a successful
+    # broadcast — if the process dies mid-way, the rest is retried next run.
     broadcasted = 0
     for game in new_games:
         await broadcast_game(bot, game)
+        async with async_session() as session:
+            session.add(
+                Game(
+                    external_id=game.get("id"),
+                    title=game.get("title") or "Unknown",
+                    worth=game.get("worth"),
+                    end_date=game.get("end_date"),
+                    thumbnail=game.get("thumbnail"),
+                    platforms=game.get("platforms"),
+                    description=game.get("description"),
+                    open_giveaway_url=game.get("open_giveaway_url"),
+                )
+            )
+            await session.commit()
         broadcasted += 1
 
     log.info(

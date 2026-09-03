@@ -69,7 +69,9 @@ async def _seed_user_with_game(
 
 
 @pytest.mark.asyncio
-async def test_send_reminders_skips_explicit_remind_with_future_time(session_factory, monkeypatch) -> None:
+async def test_send_reminders_skips_explicit_remind_with_future_time(
+    session_factory, monkeypatch
+) -> None:
     """A 'remind' row with remind_at in the future must NOT trigger a reminder."""
     now = datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc)
     future = now + timedelta(hours=12)
@@ -83,8 +85,10 @@ async def test_send_reminders_skips_explicit_remind_with_future_time(session_fac
 
     bot_sends = []
     bot = type("B", (), {})()
+
     async def _send(*args, **kwargs):
         bot_sends.append((args, kwargs))
+
     bot.send_message = _send
     bot.send_photo = _send
 
@@ -101,7 +105,9 @@ async def test_send_reminders_skips_explicit_remind_with_future_time(session_fac
 
 
 @pytest.mark.asyncio
-async def test_send_reminders_sends_explicit_remind_with_past_time(session_factory, monkeypatch) -> None:
+async def test_send_reminders_sends_explicit_remind_with_past_time(
+    session_factory, monkeypatch
+) -> None:
     """A 'remind' row with remind_at in the past MUST trigger a reminder."""
     now = datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc)
     past = now - timedelta(hours=1)
@@ -115,8 +121,10 @@ async def test_send_reminders_sends_explicit_remind_with_past_time(session_facto
 
     bot_sends = []
     bot = type("B", (), {})()
+
     async def _send(*args, **kwargs):
         bot_sends.append((args, kwargs))
+
     bot.send_message = _send
     bot.send_photo = _send
 
@@ -146,8 +154,10 @@ async def test_send_reminders_skips_fresh_notified(session_factory, monkeypatch)
 
     bot_sends = []
     bot = type("B", (), {})()
+
     async def _send(*args, **kwargs):
         bot_sends.append((args, kwargs))
+
     bot.send_message = _send
     bot.send_photo = _send
 
@@ -177,8 +187,10 @@ async def test_send_reminders_sends_auto_for_old_notified(session_factory, monke
 
     bot_sends = []
     bot = type("B", (), {})()
+
     async def _send(*args, **kwargs):
         bot_sends.append((args, kwargs))
+
     bot.send_message = _send
     bot.send_photo = _send
 
@@ -209,8 +221,10 @@ async def test_send_reminders_skips_inactive_user(session_factory, monkeypatch) 
 
     bot_sends = []
     bot = type("B", (), {})()
+
     async def _send(*args, **kwargs):
         bot_sends.append((args, kwargs))
+
     bot.send_message = _send
     bot.send_photo = _send
 

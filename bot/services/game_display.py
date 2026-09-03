@@ -56,7 +56,9 @@ async def show_active_games_to_user(
         try:
             await reply_target.answer(t("no_active_games", lang), parse_mode=ParseMode.HTML)
         except TelegramForbiddenError:
-            logger.info("Cannot send empty normalized games state to blocked user {tg_id}", tg_id=tg_id)
+            logger.info(
+                "Cannot send empty normalized games state to blocked user {tg_id}", tg_id=tg_id
+            )
         return
 
     filtered_games: list[dict[str, Any]] = list(game_by_id.values())
@@ -73,7 +75,8 @@ async def show_active_games_to_user(
             )
             hidden_ids = set(status_result.scalars().all())
         filtered_games = [
-            game for game in game_by_id.values()
+            game
+            for game in game_by_id.values()
             if isinstance(game.get("id"), int) and game.get("id") not in hidden_ids
         ]
     except Exception as exc:

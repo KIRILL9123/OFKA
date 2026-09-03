@@ -46,7 +46,7 @@ def _mark_admin_action(tg_id: int) -> None:
 
 async def _cleanup_expired_broadcasts() -> None:
     """Background task to clean up expired broadcast requests.
-    
+
     Runs periodically to remove stale entries from _pending_broadcast dict.
     Prevents memory leaks if admin doesn't confirm/cancel requests.
     Stops gracefully when _cleanup_running is set to False.
@@ -56,10 +56,11 @@ async def _cleanup_expired_broadcasts() -> None:
             await asyncio.sleep(60)  # Check every minute
             if not _cleanup_running:
                 break
-            
+
             now = time.time()
             expired_ids = [
-                tg_id for tg_id, (_, timestamp) in _pending_broadcast.items()
+                tg_id
+                for tg_id, (_, timestamp) in _pending_broadcast.items()
                 if now - timestamp > BROADCAST_TTL_SECONDS
             ]
             for tg_id in expired_ids:
@@ -76,7 +77,7 @@ async def _cleanup_expired_broadcasts() -> None:
 
 async def _start_cleanup_task() -> None:
     """Start the background cleanup task for expired broadcasts.
-    
+
     Must be called as: await _start_cleanup_task() from async context.
     """
     global _cleanup_running, _cleanup_task
@@ -231,14 +232,19 @@ async def cmd_broadcast(message: Message) -> None:
     # Validate broadcast message length
     if len(payload) > settings.MAX_MESSAGE_LENGTH:
         await message.answer(
-            t("admin_broadcast_too_long", None, length=len(payload), max_length=settings.MAX_MESSAGE_LENGTH)
+            t(
+                "admin_broadcast_too_long",
+                None,
+                length=len(payload),
+                max_length=settings.MAX_MESSAGE_LENGTH,
+            )
         )
         return
 
     # Store pending broadcast with TTL and ask for confirmation
     tg_id = message.from_user.id
     _pending_broadcast[tg_id] = (payload, time.time())
-    
+
     confirm_keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -262,26 +268,24 @@ async def cb_broadcast_confirm(callback: CallbackQuery, bot: Bot) -> None:
     if tg_id != settings.ADMIN_ID:
         await callback.answer(t("admin_unauthorized", None), show_alert=True)
         return
-    
+
     pending_data = _pending_broadcast.pop(tg_id, None)
     if not pending_data:
         await callback.answer(t("admin_no_pending", None), show_alert=True)
         return
-    
+
     payload, timestamp = pending_data
-    
+
     # Check if TTL expired (5 minutes)
     if time.time() - timestamp > BROADCAST_TTL_SECONDS:
         await callback.answer(t("admin_broadcast_expired", None), show_alert=True)
         return
-    
+
     status_msg = await callback.message.edit_text(t("admin_broadcasting", None))
 
     async def _progress(done: int, total: int) -> None:
         try:
-            await status_msg.edit_text(
-                t("admin_broadcast_progress", None, done=done, total=total)
-            )
+            await status_msg.edit_text(t("admin_broadcast_progress", None, done=done, total=total))
         except Exception:
             pass
 
@@ -307,7 +311,7 @@ async def cb_broadcast_cancel(callback: CallbackQuery) -> None:
     if tg_id != settings.ADMIN_ID:
         await callback.answer(t("admin_unauthorized", None), show_alert=True)
         return
-    
+
     _pending_broadcast.pop(tg_id, None)
     await callback.message.delete()
     await callback.answer(t("admin_broadcast_cancelled", None))

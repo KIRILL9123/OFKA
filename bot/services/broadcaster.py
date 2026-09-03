@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -12,7 +13,7 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, URLInputFile
 from loguru import logger
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from bot.core.database import async_session
@@ -24,30 +25,25 @@ from bot.utils.dates import format_end_date
 SEND_DELAY = 0.05
 MAX_RETRY_ATTEMPTS = 5
 MAX_CAPTION_LENGTH = 1024
+BROADCAST_PAGE_SIZE = 500
 
 _STEAM_RE = re.compile(r"\bsteam\b")
 _EPIC_RE = re.compile(r"\bepic\b")
-_GOG_RE = re.compile(r"\bgog\b")
 
 
 def _format_platform_names(platforms_raw: str | None) -> str:
     """Format platform names with emojis and clean text.
-    
+
     Handles duplicates and matches exact platform names only.
     """
     if not platforms_raw or not platforms_raw.strip():
         return "🎮 Unknown"
-    
+
     platform_emoji_map = {
         "steam": "🎮 Steam",
         "epic": "🎮 Epic Games",
-        "gog": "🎮 GOG",
-        "amazon": "📦 Amazon",
-        "itch.io": "🕹️ Itch.io",
-        "ubisoft": "🎮 Ubisoft",
-        "origin": "🎮 Origin",
     }
-    
+
     # Split, lowercase, deduplicate using set comprehension for better performance
     seen = set()
     platforms = []
@@ -56,7 +52,7 @@ def _format_platform_names(platforms_raw: str | None) -> str:
         if p_clean and p_clean not in seen:
             seen.add(p_clean)
             platforms.append(p_clean)
-    
+
     formatted = []
     for platform in platforms:
         # Exact match (platforms already lowercased and stripped above)
@@ -65,7 +61,7 @@ def _format_platform_names(platforms_raw: str | None) -> str:
         else:
             # Fallback: capitalize and add generic emoji
             formatted.append(f"🎮 {platform.title()}")
-    
+
     return ", ".join(formatted) if formatted else "🎮 Unknown"
 
 
@@ -78,51 +74,33 @@ def _game_matches_preferences(
     game: dict[str, Any],
     pref_steam: bool,
     pref_epic: bool,
-    pref_gog: bool,
-    pref_other: bool,
 ) -> bool:
-    """Return True if giveaway platforms match at least one enabled preference.
-    
-    Handles empty/null platforms gracefully and normalizes duplicates.
+    """Return True if the giveaway is on Steam or Epic and the user wants it.
+
+    Only Steam and Epic Games Store are supported; games on other platforms
+    (or with unknown/empty platforms) never match.
     """
     platforms_raw = str(game.get("platforms", "")).strip().lower()
-    
-    # If platforms string is empty, treat as "Other"
     if not platforms_raw:
-        return pref_other
+        return False
 
     # Normalize: split, strip, deduplicate using set for performance
-    seen_platforms = set()
-    platform_list = []
+    seen_platforms: set[str] = set()
+    platform_list: list[str] = []
     for p in platforms_raw.split(","):
         p_clean = p.strip()
         if p_clean and p_clean not in seen_platforms:
             seen_platforms.add(p_clean)
             platform_list.append(p_clean)
 
-    has_steam = any(_STEAM_RE.search(p) for p in platform_list)
-    has_epic = any(_EPIC_RE.search(p) for p in platform_list)
-    has_gog = any(_GOG_RE.search(p) for p in platform_list)
-
-    known_hit = (
-        (pref_steam and has_steam)
-        or (pref_epic and has_epic)
-        or (pref_gog and has_gog)
-    )
-    if known_hit:
+    if pref_steam and any(_STEAM_RE.search(p) for p in platform_list):
         return True
-
-    # "Other" means at least one token that doesn't look like Steam/Epic/GOG.
-    has_other = any(
-        not (_STEAM_RE.search(p) or _EPIC_RE.search(p) or _GOG_RE.search(p))
-        for p in platform_list
-    )
-    return pref_other and has_other
+    return bool(pref_epic and any(_EPIC_RE.search(p) for p in platform_list))
 
 
 def build_game_caption(game: dict[str, Any], lang: str | None) -> str:
     """Format an HTML caption for a game giveaway notification.
-    
+
     Handles N/A values gracefully, truncates long descriptions and titles,
     formats dates and platforms with emojis.
     """
@@ -131,30 +109,34 @@ def build_game_caption(game: dict[str, Any], lang: str | None) -> str:
     # worth, platforms, end_date and HTML tags within Telegram's 1024-char caption limit.
     MAX_DESCRIPTION_LENGTH = 800
     MAX_TITLE_LENGTH = 200
-    
+
     # Truncate title to prevent caption from exceeding 1024 char limit
     title = game.get("title") or unknown  # Handle empty string
     if len(title) > MAX_TITLE_LENGTH:
         title = title[:MAX_TITLE_LENGTH].rstrip() + "…"
-    
+
     worth = game.get("worth", "N/A")
     if worth == "N/A":
         worth = unknown
-    
+
     # Format platforms with emojis
     platforms_raw = game.get("platforms", "")
     platforms = _format_platform_names(platforms_raw) if platforms_raw else unknown
-    
+
     # Format end date with days remaining
     end_date_raw = game.get("end_date", "")
-    end_date = _format_end_date(end_date_raw, lang) if (end_date_raw and end_date_raw != "N/A") else unknown
-    
+    end_date = (
+        _format_end_date(end_date_raw, lang)
+        if (end_date_raw and end_date_raw != "N/A")
+        else unknown
+    )
+
     # Build description section: truncate if too long
     description = (game.get("description") or "").strip()
     if len(description) > MAX_DESCRIPTION_LENGTH:
         description = description[:MAX_DESCRIPTION_LENGTH].rstrip() + "..."
     description_section = f"\n\n<i>{description}</i>" if description else ""
-    
+
     caption = t(
         "game_caption",
         lang,
@@ -209,9 +191,7 @@ def _build_action_keyboard(
     """Build game action keyboard with claim URL and quick status actions."""
     if game_external_id is None:
         return InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text=t("btn_claim_game", lang), url=url)]
-            ]
+            inline_keyboard=[[InlineKeyboardButton(text=t("btn_claim_game", lang), url=url)]]
         )
 
     return InlineKeyboardMarkup(
@@ -326,7 +306,7 @@ async def send_game_to_user(
             await asyncio.sleep(exc.retry_after)
 
         except Exception as exc:
-            logger.error(
+            logger.opt(exception=exc).error(
                 "Failed to send game to {tg_id}: {exc}",
                 tg_id=tg_id,
                 exc=exc,
@@ -336,48 +316,75 @@ async def send_game_to_user(
     return True
 
 
+async def _load_active_user_page(
+    last_id: int,
+) -> list[tuple[int, int, str | None, bool, bool]]:
+    """Load one page of active users with id > last_id (keyset pagination)."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(User.id, User.tg_id, User.language, User.pref_steam, User.pref_epic)
+            .where(and_(User.is_active.is_(True), User.id > last_id))
+            .order_by(User.id)
+            .limit(BROADCAST_PAGE_SIZE)
+        )
+        return [tuple(row) for row in result.all()]
+
+
+async def _deactivate_users(tg_ids: list[int]) -> None:
+    """Batch-deactivate blocked users in a short-lived session."""
+    async with async_session() as session:
+        await session.execute(update(User).where(User.tg_id.in_(tg_ids)).values(is_active=False))
+        await session.commit()
+
+
+async def _record_delivered(game_external_id: int, tg_ids: list[int]) -> None:
+    """Insert 'notified' UserGame rows for delivered users (idempotent)."""
+    async with async_session() as session:
+        await session.execute(
+            sqlite_insert(UserGame)
+            .values(
+                [
+                    {
+                        "tg_id": tid,
+                        "game_external_id": game_external_id,
+                        "status": "notified",
+                    }
+                    for tid in tg_ids
+                ]
+            )
+            .on_conflict_do_nothing(index_elements=["tg_id", "game_external_id"])
+        )
+        await session.commit()
+
+
 async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
     """Send a game notification to every active user in their language.
 
-    Uses streaming with yield_per() to efficiently handle large user bases
-    without loading all users into memory at once.
-    
+    Users are paged in short-lived sessions (keyset pagination by User.id),
+    so no DB transaction stays open while messages go over the network.
+
     Returns (success_count, fail_count).
     """
     success = 0
     failed = 0
-    deactivated_ids: list[int] = []
-    delivered_tg_ids: list[int] = []
     game_external_id = game.get("id")
     log = logger.bind(
         event="broadcast_game",
         giveaway_id=game_external_id,
         title=game.get("title"),
     )
+    last_id = 0
 
-    # Stream users in batches of 500 to avoid memory spikes
-    async with async_session() as session:
-        result = await session.execute(
-            select(
-                User.tg_id,
-                User.language,
-                User.pref_steam,
-                User.pref_epic,
-                User.pref_gog,
-                User.pref_other,
-            ).where(User.is_active.is_(True))
-        )
+    while True:
+        rows = await _load_active_user_page(last_id)
+        if not rows:
+            break
+        last_id = rows[-1][0]
 
-        # Process users as they stream from the database (batch by batch)
-        async for tg_id, lang, pref_steam, pref_epic, pref_gog, pref_other in result.yield_per(500).tuples():
-
-            if not _game_matches_preferences(
-                game,
-                pref_steam,
-                pref_epic,
-                pref_gog,
-                pref_other,
-            ):
+        deactivated_ids: list[int] = []
+        delivered_tg_ids: list[int] = []
+        for _user_pk, tg_id, lang, pref_steam, pref_epic in rows:
+            if not _game_matches_preferences(game, pref_steam, pref_epic):
                 continue
 
             delivered = await send_game_to_user(bot, tg_id, game, lang)
@@ -389,35 +396,16 @@ async def broadcast_game(bot: Bot, game: dict[str, Any]) -> tuple[int, int]:
                 deactivated_ids.append(tg_id)
             await asyncio.sleep(SEND_DELAY)
 
-        # Batch-deactivate blocked users within same session
         if deactivated_ids:
-            await session.execute(
-                update(User)
-                .where(User.tg_id.in_(deactivated_ids))
-                .values(is_active=False)
-            )
-            await session.commit()
+            await _deactivate_users(deactivated_ids)
             log.info("Deactivated {count} blocked users", count=len(deactivated_ids))
 
-    if delivered_tg_ids and isinstance(game_external_id, int):
-        async with async_session() as session:
-            await session.execute(
-                sqlite_insert(UserGame).values(
-                    [
-                        {
-                            "tg_id": tid,
-                            "game_external_id": game_external_id,
-                            "status": "notified",
-                        }
-                        for tid in delivered_tg_ids
-                    ]
-                ).on_conflict_do_nothing(index_elements=["tg_id", "game_external_id"])
+        if delivered_tg_ids and isinstance(game_external_id, int):
+            await _record_delivered(game_external_id, delivered_tg_ids)
+            log.info(
+                "Recorded {n} UserGame notified entries",
+                n=len(delivered_tg_ids),
             )
-            await session.commit()
-        log.info(
-            "Recorded {n} UserGame notified entries",
-            n=len(delivered_tg_ids),
-        )
 
     log.info(
         "Broadcast complete: {ok} delivered, {fail} failed",
@@ -433,29 +421,42 @@ async def broadcast_text(
     progress_cb: Callable[[int, int], Awaitable[None]] | None = None,
 ) -> tuple[int, int]:
     """Send a plain text message to every active user.
-    
-    Uses streaming with yield_per to efficiently handle large user bases.
+
+    The text is HTML-escaped so arbitrary admin input can never break
+    Telegram's HTML parsing mid-broadcast. Users are paged in short-lived
+    sessions (keyset pagination by User.id).
+
     Returns (success_count, fail_count).
     """
     success = 0
     failed = 0
-    deactivated_ids: list[int] = []
+    safe_text = html.escape(text)
 
-    # Stream users in batches to avoid loading all into memory
     async with async_session() as session:
         total = int(
-            await session.scalar(select(func.count(User.id)).where(User.is_active.is_(True)))
-            or 0
+            await session.scalar(select(func.count(User.id)).where(User.is_active.is_(True))) or 0
         )
-        result = await session.execute(
-            select(User.tg_id).where(User.is_active.is_(True))
-        )
-        
-        async for (tg_id,) in result.yield_per(500).tuples():
+
+    last_id = 0
+    while True:
+        async with async_session() as session:
+            result = await session.execute(
+                select(User.id, User.tg_id)
+                .where(and_(User.is_active.is_(True), User.id > last_id))
+                .order_by(User.id)
+                .limit(BROADCAST_PAGE_SIZE)
+            )
+            rows = [tuple(row) for row in result.all()]
+        if not rows:
+            break
+        last_id = rows[-1][0]
+
+        deactivated_ids: list[int] = []
+        for _user_pk, tg_id in rows:
             try:
                 await bot.send_message(
                     chat_id=tg_id,
-                    text=text,
+                    text=safe_text,
                     parse_mode=ParseMode.HTML,
                 )
                 success += 1
@@ -467,28 +468,22 @@ async def broadcast_text(
                 try:
                     await bot.send_message(
                         chat_id=tg_id,
-                        text=text,
+                        text=safe_text,
                         parse_mode=ParseMode.HTML,
                     )
                     success += 1
                 except Exception:
                     failed += 1
             except Exception as exc:
-                logger.error("broadcast_text error for {tg_id}: {exc}", tg_id=tg_id, exc=exc)
+                logger.opt(exception=exc).error("broadcast_text error for {tg_id}", tg_id=tg_id)
                 failed += 1
 
             if progress_cb and (success + failed) % 50 == 0:
                 await progress_cb(success + failed, total)
 
             await asyncio.sleep(SEND_DELAY)
-        
-        # Batch-deactivate blocked users within same session
+
         if deactivated_ids:
-            await session.execute(
-                update(User)
-                .where(User.tg_id.in_(deactivated_ids))
-                .values(is_active=False)
-            )
-            await session.commit()
+            await _deactivate_users(deactivated_ids)
 
     return success, failed

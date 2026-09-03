@@ -136,9 +136,9 @@ async def _run_smoke() -> int:
                     await user_handlers.cmd_settings(msg)
                     msg.answer.assert_awaited()
 
-                    # Step 3: toggle GOG
-                    print("[3/5] toggle GOG ...")
-                    cb = _make_message(tg_id=42, callback_data="settings:toggle:gog")
+                    # Step 3: toggle Steam
+                    print("[3/5] toggle Steam ...")
+                    cb = _make_message(tg_id=42, callback_data="settings:toggle:steam")
                     await user_handlers.cb_toggle_platform(cb)
                     cb.answer.assert_awaited()
 

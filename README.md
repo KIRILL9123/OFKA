@@ -1,18 +1,18 @@
 # OFKA — Telegram-бот раздач бесплатных игр
 
-Бот, который каждые 15 минут опрашивает [GamerPower API](https://www.gamerpower.com/) на бесплатные PC-раздачи (Steam / Epic / GOG / прочие) и рассылает их подписчикам на 4 языках (ru, uk, en, de).
+Бот, который каждые 15 минут опрашивает [GamerPower API](https://www.gamerpower.com/) на бесплатные PC-раздачи **только для Steam и Epic Games Store** и рассылает их подписчикам на 4 языках (ru, uk, en, de).
 
 ## Возможности
 
-- Подписка по `/start` с настройкой языка и платформ (Steam / Epic / GOG / Другие)
+- Подписка по `/start` с настройкой языка и платформ (Steam / Epic)
 - Рассылка новых раздач с картинкой, кнопками `Забрать / Пропустить / Напомнить завтра`
 - Ежедневные напоминания о неполученных играх (12:00 UTC)
-- Админ-команды: `/stats`, `/astats`, `/force_check`, `/broadcast`
+- Админ-команды: `/stats`, `/astats`, `/force_check`, `/broadcast`, `/backfill`
 - Rate-limit, circuit-breaker на API, миграции Alembic
 
 ## Стек
 
-- Python 3.12+ (тестируется на 3.14)
+- Python 3.12+
 - [aiogram 3](https://docs.aiogram.dev/) — Telegram-фреймворк
 - SQLAlchemy 2 (async) + aiosqlite + Alembic
 - APScheduler для фоновых задач
@@ -26,11 +26,11 @@ bot/
   core/                # config, database, translations
   handlers/            # user, games, admin
   models/              # ORM (User, Game, UserGame)
-  services/            # api_client, broadcaster, game_display
+  services/            # api_client, broadcaster, game_display, backfill
   utils/               # date helpers
 migrations/            # Alembic
 tests/                 # pytest
-scripts/               # inspect_db_and_api.py
+scripts/               # smoke.py — E2E smoke test без Telegram
 ```
 
 ## Запуск локально
@@ -45,7 +45,7 @@ cp .env.example .env
 # заполнить BOT_TOKEN и ADMIN_ID
 
 alembic upgrade head               # применить миграции
-pytest -v                          # тесты
+pytest                             # тесты
 python -m bot.main                 # запустить бота
 ```
 
@@ -78,20 +78,22 @@ alembic history                 # список ревизий
 | `DATABASE_URL` | `sqlite+aiosqlite:///data/bot.db` | URL БД |
 | `CHECK_INTERVAL_MINUTES` | `15` | как часто опрашивать GamerPower |
 | `GAMERPOWER_API_URL` | `https://www.gamerpower.com/api/filter?platform=pc&type=game&sort-by=date` | URL API |
+| `BLOCKED_GIVEAWAY_DOMAINS` | `freebies.indiegala.com,itch.io` | домены-исключения для раздач |
 
 Полный список — в `bot/core/config.py`.
 
 ## Тесты
 
 ```bash
-pytest
+pytest            # тесты + отчёт покрытия
+python scripts\smoke.py    # E2E smoke test (in-memory SQLite)
 ```
 
-Покрывают: circuit-breaker и ретраи API, фильтрацию платформ в broadcaster, форматирование дат, логику `check_new_games`, отписку.
+Покрывают: circuit-breaker и ретраи API, фильтрацию платформ в broadcaster, форматирование дат, логику `check_new_games`, отписку, напоминания. CI (`.github/workflows/ci.yml`) гоняет ruff + pytest на каждый push/PR.
 
 ## Деплой
 
-Бот упакован в `Dockerfile` (python:3.12-alpine, лимит 128 MB), `restart: always`, healthcheck через `python -c "import bot.core.config"`. На VPS:
+Бот упакован в multi-stage `Dockerfile` (python:3.12-alpine, сборка gcc только в builder-стадии), `restart: always`, healthcheck через `python -c "import bot.core.healthcheck"`. На VPS:
 
 ```bash
 git pull

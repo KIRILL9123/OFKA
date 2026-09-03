@@ -13,8 +13,8 @@ def test_cb_unsubscribe_sends_message_via_bot_after_delete(monkeypatch) -> None:
     async def fake_not_limited(_: int) -> bool:
         return False
 
-    async def fake_get_or_create_user(_: int) -> tuple[str | None, bool, bool, bool, bool, bool, bool]:
-        return "en", True, True, False, False, False, False
+    async def fake_get_or_create_user(_: int) -> tuple[str | None, bool, bool, bool, bool]:
+        return "en", True, True, False, False
 
     class FakeSession:
         async def execute(self, *_args, **_kwargs) -> None:

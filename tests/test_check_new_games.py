@@ -35,6 +35,9 @@ class _Session:
     async def execute(self, *_args: Any, **_kwargs: Any) -> _ExecuteResult:
         return _ExecuteResult(list(self._existing_ids))
 
+    def add(self, obj: Any) -> None:
+        self.added_objects.append(obj)
+
     def add_all(self, objects: list[Any]) -> None:
         self.added_objects.extend(objects)
 
@@ -62,8 +65,8 @@ def _make_async_session(existing_ids: set[int]) -> Any:
 
 @pytest.mark.asyncio
 async def test_no_games_returned() -> None:
-    with patch('bot.main.fetch_free_games', new=AsyncMock(return_value=[])):
-        with patch('bot.main.broadcast_game', new=AsyncMock()) as broadcast_mock:
+    with patch("bot.main.fetch_free_games", new=AsyncMock(return_value=[])):
+        with patch("bot.main.broadcast_game", new=AsyncMock()) as broadcast_mock:
             await check_new_games(AsyncMock())
 
     broadcast_mock.assert_not_awaited()
@@ -71,11 +74,11 @@ async def test_no_games_returned() -> None:
 
 @pytest.mark.asyncio
 async def test_new_game_is_broadcasted() -> None:
-    game = {'id': 1, 'title': 'Test Game', 'status': 'active'}
+    game = {"id": 1, "title": "Test Game", "status": "active"}
 
-    with patch('bot.main.fetch_free_games', new=AsyncMock(return_value=[game])):
-        with patch('bot.main.async_session', _make_async_session(set())):
-            with patch('bot.main.broadcast_game', new=AsyncMock()) as broadcast_mock:
+    with patch("bot.main.fetch_free_games", new=AsyncMock(return_value=[game])):
+        with patch("bot.main.async_session", _make_async_session(set())):
+            with patch("bot.main.broadcast_game", new=AsyncMock()) as broadcast_mock:
                 bot = AsyncMock()
                 await check_new_games(bot)
 
@@ -84,11 +87,11 @@ async def test_new_game_is_broadcasted() -> None:
 
 @pytest.mark.asyncio
 async def test_already_known_game_not_broadcasted() -> None:
-    game = {'id': 1, 'title': 'Test Game', 'status': 'active'}
+    game = {"id": 1, "title": "Test Game", "status": "active"}
 
-    with patch('bot.main.fetch_free_games', new=AsyncMock(return_value=[game])):
-        with patch('bot.main.async_session', _make_async_session({1})):
-            with patch('bot.main.broadcast_game', new=AsyncMock()) as broadcast_mock:
+    with patch("bot.main.fetch_free_games", new=AsyncMock(return_value=[game])):
+        with patch("bot.main.async_session", _make_async_session({1})):
+            with patch("bot.main.broadcast_game", new=AsyncMock()) as broadcast_mock:
                 await check_new_games(AsyncMock())
 
     broadcast_mock.assert_not_awaited()
@@ -96,12 +99,12 @@ async def test_already_known_game_not_broadcasted() -> None:
 
 @pytest.mark.asyncio
 async def test_expired_game_not_broadcasted() -> None:
-    game = {'id': 1, 'title': 'Expired Game', 'status': 'active', 'end_date': '2020-01-01'}
+    game = {"id": 1, "title": "Expired Game", "status": "active", "end_date": "2020-01-01"}
 
-    with patch('bot.main.fetch_free_games', new=AsyncMock(return_value=[game])):
-        with patch('bot.main.async_session', _make_async_session(set())):
-            with patch('bot.main.format_end_date', return_value=None):
-                with patch('bot.main.broadcast_game', new=AsyncMock()) as broadcast_mock:
+    with patch("bot.main.fetch_free_games", new=AsyncMock(return_value=[game])):
+        with patch("bot.main.async_session", _make_async_session(set())):
+            with patch("bot.main.format_end_date", return_value=None):
+                with patch("bot.main.broadcast_game", new=AsyncMock()) as broadcast_mock:
                     await check_new_games(AsyncMock())
 
     broadcast_mock.assert_not_awaited()
@@ -111,7 +114,9 @@ async def test_expired_game_not_broadcasted() -> None:
 async def test_check_new_games_skips_overlapping_run() -> None:
     await main_module._check_new_games_lock.acquire()
     try:
-        with patch("bot.main.fetch_free_games", new=AsyncMock(return_value=[{"id": 1, "title": "A"}])) as fetch_mock:
+        with patch(
+            "bot.main.fetch_free_games", new=AsyncMock(return_value=[{"id": 1, "title": "A"}])
+        ) as fetch_mock:
             await check_new_games(AsyncMock())
     finally:
         main_module._check_new_games_lock.release()

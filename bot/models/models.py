@@ -29,16 +29,6 @@ class User(Base):
         server_default=text("1"),
         nullable=False,
     )
-    pref_gog: Mapped[bool] = mapped_column(
-        Boolean,
-        server_default=text("0"),
-        nullable=False,
-    )
-    pref_other: Mapped[bool] = mapped_column(
-        Boolean,
-        server_default=text("0"),
-        nullable=False,
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
@@ -61,9 +51,7 @@ class Game(Base):
     platforms: Mapped[str | None] = mapped_column(String(512), nullable=True)
     description: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     open_giveaway_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    sent_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
-    )
+    sent_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
     def __repr__(self) -> str:
         return f"<Game id={self.external_id} title={self.title!r}>"
@@ -73,9 +61,7 @@ class UserGame(Base):
     """Per-user action state for a giveaway (claimed/skipped/remind)."""
 
     __tablename__ = "user_games"
-    __table_args__ = (
-        UniqueConstraint("tg_id", "game_external_id", name="uq_user_games_tg_game"),
-    )
+    __table_args__ = (UniqueConstraint("tg_id", "game_external_id", name="uq_user_games_tg_game"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tg_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)

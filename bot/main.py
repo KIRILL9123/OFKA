@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from collections.abc import Coroutine
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from alembic import command
 from alembic.config import Config
@@ -30,6 +32,18 @@ from bot.utils.dates import format_end_date
 
 _check_new_games_lock = asyncio.Lock()
 _send_reminders_lock = asyncio.Lock()
+
+# Strong references to fire-and-forget tasks so they are not garbage-collected.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_background_task(coro: Coroutine[Any, Any, None]) -> asyncio.Task:
+    """Create a background task and keep a reference until it finishes."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -84,31 +98,14 @@ async def check_new_games(bot: Bot) -> None:
             )
             existing_ids = set(existing_result.scalars().all())
 
-            new_ids = [external_id for external_id in external_ids if external_id not in existing_ids]
-            new_games = [games_by_external_id[external_id] for external_id in new_ids]
-
-            if new_games:
-                session.add_all(
-                    [
-                        Game(
-                            external_id=external_id,
-                            title=games_by_external_id[external_id].get("title") or "Unknown",
-                            worth=games_by_external_id[external_id].get("worth"),
-                            end_date=games_by_external_id[external_id].get("end_date"),
-                            thumbnail=games_by_external_id[external_id].get("thumbnail"),
-                            platforms=games_by_external_id[external_id].get("platforms"),
-                            description=games_by_external_id[external_id].get("description"),
-                            open_giveaway_url=games_by_external_id[external_id].get("open_giveaway_url"),
-                        )
-                        for external_id in new_ids
-                    ]
-                )
-                await session.commit()
+        new_ids = [external_id for external_id in external_ids if external_id not in existing_ids]
 
         new_count = 0
-        for game in new_games:
+        for external_id in new_ids:
+            game = games_by_external_id[external_id]
+
             # Validate game has required fields and is not expired
-            if not game.get("title") or not game.get("id"):
+            if not game.get("title"):
                 logger.warning("Skipping invalid game: {game}", game=game)
                 continue
 
@@ -119,9 +116,26 @@ async def check_new_games(bot: Bot) -> None:
                     logger.info("Skipping expired game: {title}", title=game.get("title"))
                     continue
 
+            # Broadcast first, record in DB after: if the process dies
+            # mid-broadcast, the game is simply retried on the next run.
             logger.info("New giveaway detected: {title}", title=game.get("title"))
-            new_count += 1
             await broadcast_game(bot, game)
+
+            async with async_session() as session:
+                session.add(
+                    Game(
+                        external_id=external_id,
+                        title=game.get("title") or "Unknown",
+                        worth=game.get("worth"),
+                        end_date=game.get("end_date"),
+                        thumbnail=game.get("thumbnail"),
+                        platforms=game.get("platforms"),
+                        description=game.get("description"),
+                        open_giveaway_url=game.get("open_giveaway_url"),
+                    )
+                )
+                await session.commit()
+            new_count += 1
 
         logger.info("Check complete — {n} new game(s) broadcasted", n=new_count)
 
@@ -206,19 +220,16 @@ async def _send_reminders_impl(bot: Bot) -> None:
         except TelegramForbiddenError:
             reminded_ids.append(user_game.id)
         except Exception as exc:
-            log.warning(
+            log.opt(exception=exc).warning(
                 "Failed to send reminder",
                 user_id=user_game.tg_id,
                 giveaway_id=user_game.game_external_id,
-                exc=exc,
             )
 
     if reminded_ids:
         async with async_session() as session:
             await session.execute(
-                update(UserGame)
-                .where(UserGame.id.in_(reminded_ids))
-                .values(status="reminded")
+                update(UserGame).where(UserGame.id.in_(reminded_ids)).values(status="reminded")
             )
             await session.commit()
 
@@ -253,7 +264,7 @@ async def on_startup(bot: Bot) -> None:
 
     await asyncio.to_thread(run_alembic_migrations)
     logger.info("Database migrations applied")
-    
+
     # Start background cleanup task for broadcast TTL
     await _start_cleanup_task()
     await start_rate_limit_cleanup()
@@ -271,7 +282,7 @@ async def on_startup(bot: Bot) -> None:
     logger.info("Bot commands registered")
 
     # Run initial check after DB is fully ready
-    asyncio.create_task(check_new_games(bot))
+    _spawn_background_task(check_new_games(bot))
 
 
 async def on_shutdown(bot: Bot) -> None:
@@ -279,13 +290,15 @@ async def on_shutdown(bot: Bot) -> None:
     # Stop cleanup task gracefully
     await stop_cleanup_task()
     await stop_rate_limit_cleanup()
-    
+
     await engine.dispose()
     logger.info("Bot shut down gracefully")
 
 
 async def main() -> None:
     """Wire everything together and start polling."""
+    settings.ensure_runtime_ready()
+
     bot = Bot(token=settings.BOT_TOKEN)
     dp = Dispatcher()
 

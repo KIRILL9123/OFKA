@@ -38,14 +38,15 @@ DONE_CB = f"{SETTINGS_PREFIX}done"
 PLATFORM_FIELDS: dict[str, str] = {
     "steam": "pref_steam",
     "epic": "pref_epic",
-    "gog": "pref_gog",
-    "other": "pref_other",
 }
 
 # Backwards-compat shims — re-exported for tests and other modules
 # that previously imported the underscore-prefixed names from this module.
 _is_rate_limited = is_rate_limited
 _get_or_create_user = get_or_create_user
+
+# Strong references to fire-and-forget tasks so they are not garbage-collected.
+_background_tasks: set[asyncio.Task] = set()
 
 
 def _validate_callback_data(data: str, max_length: int | None = None) -> bool:
@@ -74,7 +75,10 @@ def _main_menu_keyboard(lang: str | None = None) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=t("btn_games", lang)), KeyboardButton(text=t("btn_stats", lang))],
-            [KeyboardButton(text=t("btn_settings", lang)), KeyboardButton(text=t("btn_help", lang))],
+            [
+                KeyboardButton(text=t("btn_settings", lang)),
+                KeyboardButton(text=t("btn_help", lang)),
+            ],
         ],
         resize_keyboard=True,
     )
@@ -98,8 +102,6 @@ def _settings_keyboard(
     lang: str | None,
     pref_steam: bool,
     pref_epic: bool,
-    pref_gog: bool,
-    pref_other: bool,
 ) -> InlineKeyboardMarkup:
     """Build user settings keyboard with platform toggles, language button, and unsubscribe."""
     current_lang = lang if lang in LANG_LABELS else "en"
@@ -114,16 +116,6 @@ def _settings_keyboard(
                 InlineKeyboardButton(
                     text=f"{_on_off(pref_epic)} {t('settings_btn_epic', lang)}",
                     callback_data=f"{TOGGLE_CALLBACK_PREFIX}epic",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text=f"{_on_off(pref_gog)} {t('settings_btn_gog', lang)}",
-                    callback_data=f"{TOGGLE_CALLBACK_PREFIX}gog",
-                ),
-                InlineKeyboardButton(
-                    text=f"{_on_off(pref_other)} {t('settings_btn_other', lang)}",
-                    callback_data=f"{TOGGLE_CALLBACK_PREFIX}other",
                 ),
             ],
             [
@@ -153,36 +145,11 @@ def _parse_worth_value(value: str) -> float:
     return float(normalized)
 
 
-async def _get_or_create_user(
-    tg_id: int,
-) -> tuple[str | None, bool, bool, bool, bool, bool, bool]:
-    """Fetch user settings in one query, creating/reactivating the user when needed."""
-    async with async_session() as session:
-        result = await session.execute(select(User).where(User.tg_id == tg_id))
-        user = result.scalars().first()
-
-        created = False
-        reactivated = False
-        if user is None:
-            created = True
-            user = User(tg_id=tg_id, is_active=True)
-            session.add(user)
-            await session.commit()
-            await session.refresh(user)
-        elif not user.is_active:
-            reactivated = True
-            user.is_active = True
-            await session.commit()
-
-        return (
-            user.language,
-            user.pref_steam,
-            user.pref_epic,
-            user.pref_gog,
-            user.pref_other,
-            created,
-            reactivated,
-        )
+def _spawn_games_task(bot: Bot, tg_id: int, lang: str | None, message: Message) -> None:
+    """Create the show-games-on-start task and keep a strong reference to it."""
+    task = asyncio.create_task(_show_games_on_start(bot, tg_id, lang, message))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 async def _show_games_on_start(bot: Bot, tg_id: int, lang: str | None, message: Message) -> None:
@@ -191,10 +158,9 @@ async def _show_games_on_start(bot: Bot, tg_id: int, lang: str | None, message: 
         await asyncio.sleep(0.8)  # Let welcome message render first
         await show_active_games_to_user(bot, tg_id, lang, message)
     except Exception as exc:
-        logger.warning(
-            "Failed to show games on start for {tg_id}: {exc}",
+        logger.opt(exception=exc).warning(
+            "Failed to show games on start for {tg_id}",
             tg_id=tg_id,
-            exc=exc,
         )
 
 
@@ -205,14 +171,14 @@ async def cmd_start(message: Message) -> None:
 
     # Rate-limit check
     if await _is_rate_limited(tg_id):
-        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+        lang, _, _, _, _ = await _get_or_create_user(tg_id)
         await message.answer(
             t("rate_limit_message", lang),
             parse_mode="HTML",
         )
         return
 
-    lang, _, _, _, _, created, reactivated = await _get_or_create_user(tg_id)
+    lang, _, _, created, reactivated = await _get_or_create_user(tg_id)
 
     if reactivated:
         logger.info("User {tg_id} resubscribed lang={lang}", tg_id=tg_id, lang=lang)
@@ -234,7 +200,7 @@ async def cmd_start(message: Message) -> None:
             )
 
     # Show active giveaways to new and returning users
-    asyncio.create_task(_show_games_on_start(message.bot, tg_id, lang, message))
+    _spawn_games_task(message.bot, tg_id, lang, message)
 
     logger.info(
         "User {tg_id} started the bot (created={created}, reactivated={reactivated}, lang={lang})",
@@ -248,7 +214,7 @@ async def cmd_start(message: Message) -> None:
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
     """Show help information in the user's language."""
-    lang, _, _, _, _, _, _ = await _get_or_create_user(message.from_user.id)
+    lang, _, _, _, _ = await _get_or_create_user(message.from_user.id)
     await message.answer(
         t("help", lang),
         parse_mode="HTML",
@@ -262,29 +228,40 @@ async def cmd_settings(message: Message) -> None:
 
     # Rate-limit check
     if await _is_rate_limited(tg_id):
-        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+        lang, _, _, _, _ = await _get_or_create_user(tg_id)
         await message.answer(
             t("rate_limit_message", lang),
             parse_mode="HTML",
         )
         return
 
-    lang, pref_steam, pref_epic, pref_gog, pref_other, _, _ = await _get_or_create_user(tg_id)
+    lang, pref_steam, pref_epic, _, _ = await _get_or_create_user(tg_id)
 
     await message.answer(
         t("settings_title", lang),
         parse_mode="HTML",
-        reply_markup=_settings_keyboard(lang, pref_steam, pref_epic, pref_gog, pref_other),
+        reply_markup=_settings_keyboard(lang, pref_steam, pref_epic),
     )
 
 
-@router.message(F.text.in_({t("btn_settings", "ru"), t("btn_settings", "uk"), t("btn_settings", "en"), t("btn_settings", "de")}))
+@router.message(
+    F.text.in_(
+        {
+            t("btn_settings", "ru"),
+            t("btn_settings", "uk"),
+            t("btn_settings", "en"),
+            t("btn_settings", "de"),
+        }
+    )
+)
 async def open_settings_button(message: Message) -> None:
     """Open settings when user taps reply keyboard button."""
     await cmd_settings(message)
 
 
-@router.message(F.text.in_({t("btn_help", "ru"), t("btn_help", "uk"), t("btn_help", "en"), t("btn_help", "de")}))
+@router.message(
+    F.text.in_({t("btn_help", "ru"), t("btn_help", "uk"), t("btn_help", "en"), t("btn_help", "de")})
+)
 async def open_help_button(message: Message) -> None:
     """Open help when user taps reply keyboard button."""
     await cmd_help(message)
@@ -295,14 +272,14 @@ async def open_games_button(message: Message) -> None:
     """Open active games list when user taps the Games button."""
     tg_id = message.from_user.id
     if await _is_rate_limited(tg_id):
-        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+        lang, _, _, _, _ = await _get_or_create_user(tg_id)
         try:
             await message.answer(t("rate_limit_message", lang), parse_mode="HTML")
         except TelegramForbiddenError:
             logger.info("User {tg_id} blocked the bot in games button", tg_id=tg_id)
         return
 
-    lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+    lang, _, _, _, _ = await _get_or_create_user(tg_id)
     await show_active_games_to_user(message.bot, tg_id, lang, message)
 
 
@@ -311,14 +288,14 @@ async def cmd_stats_user(message: Message) -> None:
     """Show per-user claim/skip/savings stats."""
     tg_id = message.from_user.id
     if await _is_rate_limited(tg_id):
-        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+        lang, _, _, _, _ = await _get_or_create_user(tg_id)
         try:
             await message.answer(t("rate_limit_message", lang), parse_mode="HTML")
         except TelegramForbiddenError:
             logger.info("User {tg_id} blocked the bot in stats button", tg_id=tg_id)
         return
 
-    lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+    lang, _, _, _, _ = await _get_or_create_user(tg_id)
 
     claimed_count = 0
     skipped_count = 0
@@ -364,7 +341,7 @@ async def cmd_stats_user(message: Message) -> None:
                 except (ValueError, TypeError, AttributeError):
                     continue
         except Exception as exc:
-            logger.warning("User stats query failed for {tg_id}: {exc}", tg_id=tg_id, exc=exc)
+            logger.opt(exception=exc).warning("User stats query failed for {tg_id}", tg_id=tg_id)
 
     try:
         await message.answer(
@@ -386,11 +363,11 @@ async def cb_open_language_picker(callback: CallbackQuery) -> None:
     """Open language picker from settings."""
     # Rate-limit check
     if await _is_rate_limited(callback.from_user.id):
-        lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
+        lang, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
 
-    lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
+    lang, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
     await callback.message.edit_text(
         t("settings_language_title", lang),
         parse_mode="HTML",
@@ -404,17 +381,15 @@ async def cb_back_to_settings(callback: CallbackQuery) -> None:
     """Return from language picker to settings menu."""
     # Rate-limit check
     if await _is_rate_limited(callback.from_user.id):
-        lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
+        lang, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
 
-    lang, pref_steam, pref_epic, pref_gog, pref_other, _, _ = await _get_or_create_user(
-        callback.from_user.id
-    )
+    lang, pref_steam, pref_epic, _, _ = await _get_or_create_user(callback.from_user.id)
     await callback.message.edit_text(
         t("settings_title", lang),
         parse_mode="HTML",
-        reply_markup=_settings_keyboard(lang, pref_steam, pref_epic, pref_gog, pref_other),
+        reply_markup=_settings_keyboard(lang, pref_steam, pref_epic),
     )
     await callback.answer()
 
@@ -429,13 +404,13 @@ async def cb_toggle_platform(callback: CallbackQuery) -> None:
             tg_id=callback.from_user.id,
             data=callback.data[:50],
         )
-        lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
+        lang, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
         await callback.answer(t("invalid_request", lang), show_alert=False)
         return
 
     platform = callback.data.removeprefix(TOGGLE_CALLBACK_PREFIX)
     field = PLATFORM_FIELDS.get(platform)
-    if field is None or platform not in PLATFORM_FIELDS:
+    if field is None:
         logger.warning(
             "Invalid platform from user {tg_id}: {platform}",
             tg_id=callback.from_user.id,
@@ -448,37 +423,22 @@ async def cb_toggle_platform(callback: CallbackQuery) -> None:
 
     # Rate-limit check
     if await _is_rate_limited(tg_id):
-        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+        lang, _, _, _, _ = await _get_or_create_user(tg_id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
 
-    lang, pref_steam, pref_epic, pref_gog, pref_other, _, _ = await _get_or_create_user(tg_id)
-    current = {
-        "pref_steam": pref_steam,
-        "pref_epic": pref_epic,
-        "pref_gog": pref_gog,
-        "pref_other": pref_other,
-    }[field]
+    lang, pref_steam, pref_epic, _, _ = await _get_or_create_user(tg_id)
+    current = pref_steam if field == "pref_steam" else pref_epic
+    new_value = not current
+    other_value = pref_epic if field == "pref_steam" else pref_steam
 
-    # Calculate new state after toggle
-    new_state = {
-        "pref_steam": pref_steam if field != "pref_steam" else not current,
-        "pref_epic": pref_epic if field != "pref_epic" else not current,
-        "pref_gog": pref_gog if field != "pref_gog" else not current,
-        "pref_other": pref_other if field != "pref_other" else not current,
-    }
-    
     # Validate: at least one platform must be enabled
-    if not any(new_state.values()):
+    if not (new_value or other_value):
         await callback.answer(t("platform_all_disabled", lang), show_alert=True)
         return
 
     async with async_session() as session:
-        await session.execute(
-            update(User)
-            .where(User.tg_id == tg_id)
-            .values(**{field: (not current)})
-        )
+        await session.execute(update(User).where(User.tg_id == tg_id).values(**{field: new_value}))
         await session.commit()
 
     # Log platform toggle
@@ -486,19 +446,18 @@ async def cb_toggle_platform(callback: CallbackQuery) -> None:
         "User {tg_id} toggled {platform} to {state}",
         tg_id=tg_id,
         platform=platform,
-        state=not current,
+        state=new_value,
     )
 
-    # Optimization: use calculated new_state instead of re-fetching from DB
-    new_pref_steam = new_state["pref_steam"]
-    new_pref_epic = new_state["pref_epic"]
-    new_pref_gog = new_state["pref_gog"]
-    new_pref_other = new_state["pref_other"]
-    
+    # Optimization: use calculated values instead of re-fetching from DB
     await callback.message.edit_text(
         t("settings_title", lang),
         parse_mode="HTML",
-        reply_markup=_settings_keyboard(lang, new_pref_steam, new_pref_epic, new_pref_gog, new_pref_other),
+        reply_markup=_settings_keyboard(
+            lang,
+            new_value if field == "pref_steam" else other_value,
+            new_value if field == "pref_epic" else other_value,
+        ),
     )
     await callback.answer(t("settings_saved", lang))
 
@@ -512,7 +471,7 @@ async def cb_set_language(callback: CallbackQuery) -> None:
             "Invalid language callback from user {tg_id}",
             tg_id=callback.from_user.id,
         )
-        lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
+        lang, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
         await callback.answer(t("invalid_request", lang), show_alert=False)
         return
 
@@ -531,25 +490,21 @@ async def cb_set_language(callback: CallbackQuery) -> None:
 
     # Rate-limit check
     if await _is_rate_limited(tg_id):
-        current_lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+        current_lang, _, _, _, _ = await _get_or_create_user(tg_id)
         await callback.answer(t("rate_limit_message", current_lang), show_alert=False)
         return
 
     async with async_session() as session:
-        await session.execute(
-            update(User)
-            .where(User.tg_id == tg_id)
-            .values(language=lang, is_active=True)
-        )
+        await session.execute(update(User).where(User.tg_id == tg_id).values(language=lang))
         await session.commit()
 
     logger.info("User {tg_id} set language to {lang}", tg_id=tg_id, lang=lang)
 
-    _, pref_steam, pref_epic, pref_gog, pref_other, _, _ = await _get_or_create_user(tg_id)
+    _, pref_steam, pref_epic, _, _ = await _get_or_create_user(tg_id)
     await callback.message.edit_text(
         f"{t('language_set', lang)}\n\n{t('settings_title', lang)}",
         parse_mode="HTML",
-        reply_markup=_settings_keyboard(lang, pref_steam, pref_epic, pref_gog, pref_other),
+        reply_markup=_settings_keyboard(lang, pref_steam, pref_epic),
     )
     await callback.answer()
 
@@ -563,17 +518,17 @@ async def cb_done_settings(callback: CallbackQuery) -> None:
             "Invalid callback data in DONE_CB from user {tg_id}",
             tg_id=callback.from_user.id,
         )
-        lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
+        lang, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
         await callback.answer(t("invalid_request", lang), show_alert=False)
         return
-    
+
     # Rate-limit check
     if await _is_rate_limited(callback.from_user.id):
-        lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
+        lang, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
 
-    lang, _, _, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
+    lang, _, _, _, _ = await _get_or_create_user(callback.from_user.id)
     await callback.message.delete()
     await callback.answer(t("settings_saved", lang))
 
@@ -585,22 +540,18 @@ async def cb_unsubscribe(callback: CallbackQuery) -> None:
 
     # Rate-limit check
     if await _is_rate_limited(tg_id):
-        lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+        lang, _, _, _, _ = await _get_or_create_user(tg_id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
 
-    lang, _, _, _, _, _, _ = await _get_or_create_user(tg_id)
+    lang, _, _, _, _ = await _get_or_create_user(tg_id)
 
     async with async_session() as session:
-        await session.execute(
-            update(User)
-            .where(User.tg_id == tg_id)
-            .values(is_active=False)
-        )
+        await session.execute(update(User).where(User.tg_id == tg_id).values(is_active=False))
         await session.commit()
 
     logger.info("User {tg_id} unsubscribed from notifications", tg_id=tg_id)
-    
+
     await callback.message.delete()
     await callback.bot.send_message(
         chat_id=tg_id,

@@ -15,7 +15,7 @@ class _Response:
     def __init__(self, status: int, payload: Any) -> None:
         self.status = status
         self._payload = payload
-        self.request_info = SimpleNamespace(real_url='https://example.test/api')
+        self.request_info = SimpleNamespace(real_url="https://example.test/api")
         self.history: tuple[Any, ...] = ()
         self.headers: dict[str, str] = {}
 
@@ -82,7 +82,7 @@ def test_circuit_breaker_opens_after_threshold() -> None:
 def test_circuit_breaker_recovers_after_timeout() -> None:
     breaker = api_client._CircuitBreaker(failure_threshold=3, recovery_timeout_seconds=300)
 
-    with patch('bot.services.api_client.time.monotonic', side_effect=[100.0, 401.0]):
+    with patch("bot.services.api_client.time.monotonic", side_effect=[100.0, 401.0]):
         breaker.record_failure()
         breaker.record_failure()
         breaker.record_failure()
@@ -91,8 +91,8 @@ def test_circuit_breaker_recovers_after_timeout() -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_free_games_returns_empty_on_circuit_open() -> None:
-    with patch.object(api_client._circuit_breaker, 'is_open', return_value=True):
-        with patch('bot.services.api_client.aiohttp.ClientSession') as mock_client_session:
+    with patch.object(api_client._circuit_breaker, "is_open", return_value=True):
+        with patch("bot.services.api_client.aiohttp.ClientSession") as mock_client_session:
             result = await api_client.fetch_free_games()
 
     assert result == []
@@ -102,22 +102,43 @@ async def test_fetch_free_games_returns_empty_on_circuit_open() -> None:
 @pytest.mark.asyncio
 async def test_fetch_free_games_returns_active_games() -> None:
     payload = [
-        {'id': 1, 'title': 'A', 'status': 'active'},
-        {'id': 2, 'title': 'B', 'status': 'expired'},
+        {"id": 1, "title": "A", "status": "active", "platforms": "Steam"},
+        {"id": 2, "title": "B", "status": "expired", "platforms": "Steam"},
     ]
     session = _Session([_Response(status=200, payload=payload)])
 
-    with patch('bot.services.api_client.aiohttp.ClientSession', return_value=_SessionContext(session)):
+    with patch(
+        "bot.services.api_client.aiohttp.ClientSession", return_value=_SessionContext(session)
+    ):
         result = await api_client.fetch_free_games()
 
-    assert result == [{'id': 1, 'title': 'A', 'status': 'active'}]
+    assert result == [{"id": 1, "title": "A", "status": "active", "platforms": "Steam"}]
+
+
+@pytest.mark.asyncio
+async def test_fetch_free_games_filters_unsupported_platforms() -> None:
+    payload = [
+        {"id": 1, "title": "Steam Game", "status": "active", "platforms": "Steam"},
+        {"id": 2, "title": "GOG Game", "status": "active", "platforms": "GOG"},
+        {"id": 3, "title": "Epic Game", "status": "active", "platforms": "Epic Games Store"},
+    ]
+    session = _Session([_Response(status=200, payload=payload)])
+
+    with patch(
+        "bot.services.api_client.aiohttp.ClientSession", return_value=_SessionContext(session)
+    ):
+        result = await api_client.fetch_free_games()
+
+    assert [g["id"] for g in result] == [1, 3]
 
 
 @pytest.mark.asyncio
 async def test_fetch_free_games_returns_empty_on_201() -> None:
     session = _Session([_Response(status=201, payload=[])])
 
-    with patch('bot.services.api_client.aiohttp.ClientSession', return_value=_SessionContext(session)):
+    with patch(
+        "bot.services.api_client.aiohttp.ClientSession", return_value=_SessionContext(session)
+    ):
         result = await api_client.fetch_free_games()
 
     assert result == []
@@ -128,15 +149,20 @@ async def test_fetch_free_games_retries_on_503() -> None:
     responses = [
         _Response(status=503, payload=[]),
         _Response(status=503, payload=[]),
-        _Response(status=200, payload=[{'id': 99, 'title': 'Recovered', 'status': 'active'}]),
+        _Response(
+            status=200,
+            payload=[{"id": 99, "title": "Recovered", "status": "active", "platforms": "Steam"}],
+        ),
     ]
     session = _Session(responses)
 
-    with patch('bot.services.api_client.aiohttp.ClientSession', return_value=_SessionContext(session)):
-        with patch('bot.services.api_client.asyncio.sleep', new=AsyncMock()) as sleep_mock:
+    with patch(
+        "bot.services.api_client.aiohttp.ClientSession", return_value=_SessionContext(session)
+    ):
+        with patch("bot.services.api_client.asyncio.sleep", new=AsyncMock()) as sleep_mock:
             result = await api_client.fetch_free_games()
 
-    assert result == [{'id': 99, 'title': 'Recovered', 'status': 'active'}]
+    assert result == [{"id": 99, "title": "Recovered", "status": "active", "platforms": "Steam"}]
     assert session.calls == 3
     assert sleep_mock.await_count == 2
 
@@ -145,14 +171,19 @@ async def test_fetch_free_games_retries_on_503() -> None:
 async def test_fetch_free_games_retries_on_malformed_json() -> None:
     responses = [
         _Response(status=200, payload=ValueError("bad json")),
-        _Response(status=200, payload=[{"id": 10, "title": "Ok", "status": "active"}]),
+        _Response(
+            status=200,
+            payload=[{"id": 10, "title": "Ok", "status": "active", "platforms": "Steam"}],
+        ),
     ]
     session = _Session(responses)
 
-    with patch("bot.services.api_client.aiohttp.ClientSession", return_value=_SessionContext(session)):
+    with patch(
+        "bot.services.api_client.aiohttp.ClientSession", return_value=_SessionContext(session)
+    ):
         with patch("bot.services.api_client.asyncio.sleep", new=AsyncMock()) as sleep_mock:
             result = await api_client.fetch_free_games()
 
-    assert result == [{"id": 10, "title": "Ok", "status": "active"}]
+    assert result == [{"id": 10, "title": "Ok", "status": "active", "platforms": "Steam"}]
     assert session.calls == 2
     assert sleep_mock.await_count == 1

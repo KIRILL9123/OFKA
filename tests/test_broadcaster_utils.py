@@ -7,34 +7,40 @@ from bot.services.broadcaster import _game_matches_preferences, build_game_capti
 from bot.utils.dates import format_end_date
 
 
-def test_game_matches_preferences_empty_platforms_maps_to_other() -> None:
+def test_game_matches_preferences_empty_platforms_never_matches() -> None:
     game = {"platforms": ""}
 
-    assert _game_matches_preferences(game, False, False, False, True) is True
-    assert _game_matches_preferences(game, False, False, False, False) is False
+    assert _game_matches_preferences(game, False, False) is False
+    assert _game_matches_preferences(game, True, True) is False
 
 
 def test_game_matches_preferences_known_platforms() -> None:
     game = {"platforms": "Steam, Epic Games Store"}
 
-    assert _game_matches_preferences(game, True, False, False, False) is True
-    assert _game_matches_preferences(game, False, True, False, False) is True
-    assert _game_matches_preferences(game, False, False, True, False) is False
+    assert _game_matches_preferences(game, True, False) is True
+    assert _game_matches_preferences(game, False, True) is True
+    assert _game_matches_preferences(game, False, False) is False
 
 
-def test_game_matches_preferences_other_platform() -> None:
+def test_game_matches_preferences_steam_only() -> None:
+    game = {"platforms": "Steam"}
+
+    assert _game_matches_preferences(game, True, False) is True
+    assert _game_matches_preferences(game, False, True) is False
+
+
+def test_game_matches_preferences_unsupported_platform_never_matches() -> None:
     game = {"platforms": "Amazon Games"}
 
-    assert _game_matches_preferences(game, False, False, False, True) is True
-    assert _game_matches_preferences(game, True, True, True, False) is False
+    assert _game_matches_preferences(game, False, False) is False
+    assert _game_matches_preferences(game, True, True) is False
 
 
 def test_game_matches_preferences_does_not_use_partial_substring_match() -> None:
     game = {"platforms": "Epicenter Store, Steamworks Hub"}
 
-    assert _game_matches_preferences(game, True, False, False, False) is False
-    assert _game_matches_preferences(game, False, True, False, False) is False
-    assert _game_matches_preferences(game, False, False, False, True) is True
+    assert _game_matches_preferences(game, True, False) is False
+    assert _game_matches_preferences(game, False, True) is False
 
 
 def test_build_game_caption_never_exceeds_telegram_caption_limit() -> None:

@@ -13,7 +13,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from bot.core.database import async_session
 from bot.core.translations import t
-from bot.models.models import UserGame
+from bot.models.models import Game, UserGame
 from bot.services.game_display import show_active_games_to_user
 from bot.services.user_service import get_or_create_user, is_rate_limited
 
@@ -35,8 +35,21 @@ async def _upsert_user_game_state(
     status: str,
     remind_at: datetime | None = None,
 ) -> bool:
-    """Store or update game action state for a user."""
+    """Store or update game action state for a user.
+
+    Returns False when nothing changed — including when the game id is
+    unknown (forged callback), so no orphan UserGame row is ever created.
+    """
     async with async_session() as session:
+        game_pk = await session.scalar(select(Game.id).where(Game.external_id == game_external_id))
+        if game_pk is None:
+            logger.warning(
+                "Ignoring action for unknown game {game_external_id} from {tg_id}",
+                game_external_id=game_external_id,
+                tg_id=tg_id,
+            )
+            return False
+
         existing_result = await session.execute(
             select(UserGame.status, UserGame.remind_at).where(
                 UserGame.tg_id == tg_id,
@@ -49,17 +62,21 @@ async def _upsert_user_game_state(
             if existing_status == status and existing_remind_at == remind_at:
                 return False
 
-        stmt = sqlite_insert(UserGame).values(
-            tg_id=tg_id,
-            game_external_id=game_external_id,
-            status=status,
-            remind_at=remind_at,
-        ).on_conflict_do_update(
-            index_elements=["tg_id", "game_external_id"],
-            set_={
-                "status": status,
-                "remind_at": remind_at,
-            },
+        stmt = (
+            sqlite_insert(UserGame)
+            .values(
+                tg_id=tg_id,
+                game_external_id=game_external_id,
+                status=status,
+                remind_at=remind_at,
+            )
+            .on_conflict_do_update(
+                index_elements=["tg_id", "game_external_id"],
+                set_={
+                    "status": status,
+                    "remind_at": remind_at,
+                },
+            )
         )
 
         try:
@@ -76,7 +93,7 @@ async def _upsert_user_game_state(
 async def cmd_games(message: Message) -> None:
     """Show current active giveaways for a user."""
     tg_id = message.from_user.id
-    lang, _, _, _, _, _, _ = await get_or_create_user(tg_id)
+    lang, _, _, _, _ = await get_or_create_user(tg_id)
     await show_active_games_to_user(message.bot, tg_id, lang, message)
 
 
@@ -94,11 +111,11 @@ async def cb_game_claim(callback: CallbackQuery) -> None:
 
     tg_id = callback.from_user.id
     if await is_rate_limited(tg_id):
-        lang, _, _, _, _, _, _ = await get_or_create_user(tg_id)
+        lang, _, _, _, _ = await get_or_create_user(tg_id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
 
-    lang, _, _, _, _, _, _ = await get_or_create_user(tg_id)
+    lang, _, _, _, _ = await get_or_create_user(tg_id)
     try:
         changed = await _upsert_user_game_state(tg_id, game_id, "claimed")
         await callback.answer(
@@ -106,7 +123,12 @@ async def cb_game_claim(callback: CallbackQuery) -> None:
             show_alert=False,
         )
     except Exception as exc:
-        logger.error("Failed to mark game {game_id} as claimed for {tg_id}: {exc}", game_id=game_id, tg_id=tg_id, exc=exc)
+        logger.error(
+            "Failed to mark game {game_id} as claimed for {tg_id}: {exc}",
+            game_id=game_id,
+            tg_id=tg_id,
+            exc=exc,
+        )
         await callback.answer()
 
 
@@ -124,11 +146,11 @@ async def cb_game_skip(callback: CallbackQuery) -> None:
 
     tg_id = callback.from_user.id
     if await is_rate_limited(tg_id):
-        lang, _, _, _, _, _, _ = await get_or_create_user(tg_id)
+        lang, _, _, _, _ = await get_or_create_user(tg_id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
 
-    lang, _, _, _, _, _, _ = await get_or_create_user(tg_id)
+    lang, _, _, _, _ = await get_or_create_user(tg_id)
     try:
         changed = await _upsert_user_game_state(tg_id, game_id, "skipped")
         await callback.answer(
@@ -136,7 +158,12 @@ async def cb_game_skip(callback: CallbackQuery) -> None:
             show_alert=False,
         )
     except Exception as exc:
-        logger.error("Failed to mark game {game_id} as skipped for {tg_id}: {exc}", game_id=game_id, tg_id=tg_id, exc=exc)
+        logger.error(
+            "Failed to mark game {game_id} as skipped for {tg_id}: {exc}",
+            game_id=game_id,
+            tg_id=tg_id,
+            exc=exc,
+        )
         await callback.answer()
 
 
@@ -154,11 +181,11 @@ async def cb_game_remind(callback: CallbackQuery) -> None:
 
     tg_id = callback.from_user.id
     if await is_rate_limited(tg_id):
-        lang, _, _, _, _, _, _ = await get_or_create_user(tg_id)
+        lang, _, _, _, _ = await get_or_create_user(tg_id)
         await callback.answer(t("rate_limit_message", lang), show_alert=False)
         return
 
-    lang, _, _, _, _, _, _ = await get_or_create_user(tg_id)
+    lang, _, _, _, _ = await get_or_create_user(tg_id)
     try:
         changed = await _upsert_user_game_state(
             tg_id,
@@ -171,5 +198,10 @@ async def cb_game_remind(callback: CallbackQuery) -> None:
             show_alert=False,
         )
     except Exception as exc:
-        logger.error("Failed to set reminder for game {game_id} and user {tg_id}: {exc}", game_id=game_id, tg_id=tg_id, exc=exc)
+        logger.error(
+            "Failed to set reminder for game {game_id} and user {tg_id}: {exc}",
+            game_id=game_id,
+            tg_id=tg_id,
+            exc=exc,
+        )
         await callback.answer()

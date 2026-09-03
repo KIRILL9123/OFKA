@@ -41,24 +41,24 @@ _TEXTS: dict[str, dict[str, str]] = {
         "ru": (
             "👋 <b>Добро пожаловать!</b>\n\n"
             "Я буду уведомлять тебя, когда появляется новая "
-            "<b>100% бесплатная игра</b> (навсегда) в <b>Steam</b>, "
-            "<b>Epic Games Store</b> или <b>GOG</b>.\n\n"
+            "<b>100% бесплатная игра</b> (навсегда) в <b>Steam</b> "
+            "или <b>Epic Games Store</b>.\n\n"
             "Ничего делать не нужно — просто жди сообщений.\n\n"
             "Команды: /help, /settings"
         ),
         "uk": (
             "👋 <b>Ласкаво просимо!</b>\n\n"
             "Я повідомлятиму тебе, коли з'являється нова "
-            "<b>100% безкоштовна гра</b> (назавжди) у <b>Steam</b>, "
-            "<b>Epic Games Store</b> або <b>GOG</b>.\n\n"
+            "<b>100% безкоштовна гра</b> (назавжди) у <b>Steam</b> "
+            "або <b>Epic Games Store</b>.\n\n"
             "Нічого робити не потрібно — просто чекай повідомлень.\n\n"
             "Команди: /help, /settings"
         ),
         "en": (
             "👋 <b>Welcome!</b>\n\n"
             "I will notify you whenever a new <b>100% free game</b> "
-            "(free to keep forever) appears on <b>Steam</b>, "
-            "<b>Epic Games Store</b>, or <b>GOG</b>.\n\n"
+            "(free to keep forever) appears on <b>Steam</b> "
+            "or <b>Epic Games Store</b>.\n\n"
             "You don't need to do anything — just keep this chat "
             "and I'll message you when a new giveaway drops.\n\n"
             "Commands: /help, /settings"
@@ -66,8 +66,8 @@ _TEXTS: dict[str, dict[str, str]] = {
         "de": (
             "👋 <b>Willkommen!</b>\n\n"
             "Ich benachrichtige dich, sobald ein neues "
-            "<b>100% kostenloses Spiel</b> (dauerhaft) auf <b>Steam</b>, "
-            "<b>Epic Games Store</b> oder <b>GOG</b> verfügbar ist.\n\n"
+            "<b>100% kostenloses Spiel</b> (dauerhaft) auf <b>Steam</b> "
+            "oder <b>Epic Games Store</b> verfügbar ist.\n\n"
             "Du musst nichts tun — warte einfach auf Nachrichten.\n\n"
             "Befehle: /help, /settings"
         ),
@@ -76,7 +76,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "ru": (
             "ℹ️ <b>Как это работает</b>\n\n"
             "Каждые 15 минут я проверяю GamerPower API на наличие "
-            "бесплатных PC-игр в Steam, Epic Games Store и GOG.\n\n"
+            "бесплатных PC-игр в Steam и Epic Games Store.\n\n"
             "Когда появляется новая <b>бесплатная навсегда</b> игра — "
             "ты получишь уведомление со ссылкой.\n\n"
             "<b>Команды:</b>\n"
@@ -87,7 +87,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "uk": (
             "ℹ️ <b>Як це працює</b>\n\n"
             "Кожні 15 хвилин я перевіряю GamerPower API на наявність "
-            "безкоштовних PC-ігор у Steam, Epic Games Store та GOG.\n\n"
+            "безкоштовних PC-ігор у Steam та Epic Games Store.\n\n"
             "Коли з'являється нова <b>безкоштовна назавжди</b> гра — "
             "ти отримаєш повідомлення з посиланням.\n\n"
             "<b>Команди:</b>\n"
@@ -98,7 +98,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "en": (
             "ℹ️ <b>How it works</b>\n\n"
             "Every 15 minutes I check the GamerPower API for new "
-            "PC game giveaways on Steam, Epic Games Store, and GOG.\n\n"
+            "PC game giveaways on Steam and Epic Games Store.\n\n"
             "When a new <b>free-to-keep</b> game appears, I send you "
             "a notification with a direct link to claim it.\n\n"
             "<b>Commands:</b>\n"
@@ -109,7 +109,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "de": (
             "ℹ️ <b>So funktioniert's</b>\n\n"
             "Alle 15 Minuten prüfe ich die GamerPower API auf neue "
-            "kostenlose PC-Spiele bei Steam, Epic Games Store und GOG.\n\n"
+            "kostenlose PC-Spiele bei Steam und Epic Games Store.\n\n"
             "Wenn ein neues <b>dauerhaft kostenloses</b> Spiel erscheint, "
             "sende ich dir eine Benachrichtigung mit Link.\n\n"
             "<b>Befehle:</b>\n"
@@ -137,10 +137,10 @@ _TEXTS: dict[str, dict[str, str]] = {
         "de": "⚙️ Öffne /settings, um Sprache und Benachrichtigungs-Plattformen zu wählen.",
     },
     "settings_title": {
-        "ru": "⚙️ <b>Настройки</b>\nВыбери, о каких платформах присылать уведомления:\n\n💡 <i>«Другие» = Amazon, Itch.io, Ubisoft, Origin, GOG+ и прочее</i>",
-        "uk": "⚙️ <b>Налаштування</b>\nОбери, про які платформи надсилати сповіщення:\n\n💡 <i>«Інші» = Amazon, Itch.io, Ubisoft, Origin, GOG+ та інше</i>",
-        "en": "⚙️ <b>Settings</b>\nChoose which platforms to notify you about:\n\n💡 <i>«Other» = Amazon, Itch.io, Ubisoft, Origin, GOG+, and more</i>",
-        "de": "⚙️ <b>Einstellungen</b>\nWähle, über welche Plattformen du Benachrichtigungen erhalten willst:\n\n💡 <i>«Andere» = Amazon, Itch.io, Ubisoft, Origin, GOG+ und mehr</i>",
+        "ru": "⚙️ <b>Настройки</b>\nВыбери, о каких платформах присылать уведомления:",
+        "uk": "⚙️ <b>Налаштування</b>\nОбери, про які платформи надсилати сповіщення:",
+        "en": "⚙️ <b>Settings</b>\nChoose which platforms to notify you about:",
+        "de": "⚙️ <b>Einstellungen</b>\nWähle, über welche Plattformen du Benachrichtigungen erhalten willst:",
     },
     "settings_language_title": {
         "ru": "🌍 <b>Выбор языка</b>",
@@ -159,18 +159,6 @@ _TEXTS: dict[str, dict[str, str]] = {
         "uk": "Epic",
         "en": "Epic",
         "de": "Epic",
-    },
-    "settings_btn_gog": {
-        "ru": "GOG",
-        "uk": "GOG",
-        "en": "GOG",
-        "de": "GOG",
-    },
-    "settings_btn_other": {
-        "ru": "Другие",
-        "uk": "Інші",
-        "en": "Other",
-        "de": "Andere",
     },
     "settings_btn_language": {
         "ru": "Язык",

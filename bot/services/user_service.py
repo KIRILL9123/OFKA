@@ -7,9 +7,10 @@ without creating circular dependencies.
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 import time
+from contextlib import suppress
 
+from loguru import logger
 from sqlalchemy import select
 
 from bot.core.config import settings
@@ -67,7 +68,7 @@ async def _cleanup_rate_limit_cache() -> None:
         except asyncio.CancelledError:
             break
         except Exception:
-            pass
+            logger.exception("Rate-limit cache cleanup failed")
 
 
 async def start_rate_limit_cleanup() -> None:
@@ -92,8 +93,11 @@ async def stop_rate_limit_cleanup() -> None:
 
 async def get_or_create_user(
     tg_id: int,
-) -> tuple[str | None, bool, bool, bool, bool, bool, bool]:
-    """Fetch user settings in one query, creating/reactivating the user when needed."""
+) -> tuple[str | None, bool, bool, bool, bool]:
+    """Fetch user settings in one query, creating/reactivating the user when needed.
+
+    Returns (language, pref_steam, pref_epic, created, reactivated).
+    """
     async with async_session() as session:
         result = await session.execute(select(User).where(User.tg_id == tg_id))
         user = result.scalars().first()
@@ -115,8 +119,6 @@ async def get_or_create_user(
             user.language,
             user.pref_steam,
             user.pref_epic,
-            user.pref_gog,
-            user.pref_other,
             created,
             reactivated,
         )

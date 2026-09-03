@@ -11,6 +11,8 @@ from loguru import logger
 
 from bot.core.config import settings
 
+BLOCKED_DOMAINS = settings.blocked_giveaway_domains
+
 API_TIMEOUT = aiohttp.ClientTimeout(total=20)
 MAX_RETRIES = 3
 BACKOFF_BASE_SECONDS = 1.0
@@ -58,16 +60,14 @@ _circuit_breaker = _CircuitBreaker(
 
 
 async def fetch_free_games() -> list[dict[str, Any]]:
-    """Fetch current PC/Steam/Epic/GOG game giveaways from GamerPower.
+    """Fetch current Steam/Epic game giveaways from GamerPower.
 
     Uses the /api/filter endpoint which handles platform and type filtering
     server-side.  Returns a list of giveaway dicts.  On any network/parsing
     error an empty list is returned so the scheduler loop never crashes.
     """
     if _circuit_breaker.is_open():
-        logger.warning(
-            "Skipping GamerPower request: circuit breaker is open"
-        )
+        logger.warning("Skipping GamerPower request: circuit breaker is open")
         return []
 
     last_exc: Exception | None = None
@@ -116,10 +116,41 @@ async def fetch_free_games() -> list[dict[str, Any]]:
                         return []
 
                     games: list[dict[str, Any]] = [
-                        g for g in data
+                        g
+                        for g in data
                         if isinstance(g, dict)
                         if g.get("status", "").lower() == "active"
                     ]
+
+                    # Filter platforms: only keep Steam and Epic Games Store
+                    before_platform = len(games)
+                    games = [
+                        g
+                        for g in games
+                        if "steam" in str(g.get("platforms", "")).lower()
+                        or "epic" in str(g.get("platforms", "")).lower()
+                    ]
+                    if len(games) < before_platform:
+                        logger.info(
+                            "Filtered out {count} giveaways of unsupported platforms",
+                            count=before_platform - len(games),
+                        )
+
+                    if BLOCKED_DOMAINS:
+                        before = len(games)
+                        games = [
+                            g
+                            for g in games
+                            if not any(
+                                domain in (g.get("open_giveaway_url") or "").lower()
+                                for domain in BLOCKED_DOMAINS
+                            )
+                        ]
+                        logger.info(
+                            "Filtered out {count} giveaways from blocked domains",
+                            count=before - len(games),
+                        )
+
                     _circuit_breaker.record_success()
                     logger.info(
                         "Fetched {count} active game giveaways",

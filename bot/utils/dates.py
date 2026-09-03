@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from bot.core.translations import t
 
@@ -33,7 +33,7 @@ def format_end_date(end_date_raw: str | None, lang: str | None = None) -> str | 
             parsed_dt = datetime.strptime(value, fmt)
             end_date = parsed_dt.date()
             display_date = parsed_dt.strftime("%Y-%m-%d")
-            today = datetime.now().date()
+            today = datetime.now(timezone.utc).date()
             delta = (end_date - today).days
 
             if delta < 0:
